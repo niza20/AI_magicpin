@@ -176,7 +176,8 @@ class Orchestrator:
                   "facts_used": [ledger.get(f).path for f in best.draft.used_fact_ids if ledger.get(f)],
                   "candidates": [{"variant": c.draft.plan.variant, "source": c.draft.source, "valid": c.valid,
                                   "score": c.crit.total, "issues": [i.code for i in c.fact.issues + c.policy.issues]} for c in cands],
-                  "is_expired": ta.is_expired, "urgency": ta.urgency, "consent_ok": (cust.consent_ok if cust else None)}
+                  "is_expired": ta.is_expired, "urgency": ta.urgency, "consent_ok": (cust.consent_ok if cust else None),
+                  "highlights": fact_spans(out["body"], ta, pz, ledger)}
         return ComposeResult(out, trace, extras)
 
     # ----------------------------------------------------------------- helpers
@@ -232,6 +233,34 @@ class Orchestrator:
         return ComposeResult(out, trace, {"template_name": "vera_consent_check_v1", "template_params": [sal, first],
                                           "consent_blocked": True, "family": ta.family, "is_expired": ta.is_expired,
                                           "urgency": ta.urgency, "consent_ok": False})
+
+
+def fact_spans(body: str, ta, pz: dict, ledger) -> list[dict]:
+    """Which substrings of the final body are context facts, and where each came from (for UI highlighting)."""
+    cands: dict[str, str] = {}
+    for k, v in list(ta.anchor.items()) + list(pz.items()):
+        if k.startswith("_") or not isinstance(v, dict) or k in ("last_touch", "ctr_gap", "ctr_above"):
+            continue
+        txt, path = str(v.get("text") or ""), v.get("path") or ""
+        if len(txt) >= 2 and txt in body:
+            cands.setdefault(txt, path or (ledger.get(v.get("fid")).path if v.get("fid") and ledger.get(v.get("fid")) else ""))
+    import re as _re
+    for f in ledger.facts.values():
+        v = f.value
+        # only distinctive strings (multi-word, or with a digit / capital), matched on word boundaries
+        if (f.layer != "derived" and isinstance(v, str) and len(v) >= 4 and "history" not in f.path
+                and (" " in v.strip() or _re.search(r"[\dA-Z₹]", v))
+                and _re.search(r"(?<!\w)" + _re.escape(v) + r"(?!\w)", body)):
+            cands.setdefault(v, f.path)
+    out = []
+    for txt, path in sorted(cands.items(), key=lambda x: -len(x[0])):
+        p = path or "derived"
+        layer = p.split(".")[0].split("<-")[0] if not p.startswith("derived") else "derived"
+        if p.startswith("derived") and "<-" in p:
+            layer = p.split("<-")[1].split(".")[0]
+        out.append({"text": txt, "source": p.replace("derived.", "computed: ").split("<-")[0] + ("" if "<-" not in p else " ← " + p.split("<-")[1]),
+                    "layer": layer if layer in ("merchant", "trigger", "category", "customer") else "derived"})
+    return out
 
 
 def trace_to_json(trace: list[TraceStep]) -> list[dict]:

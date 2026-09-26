@@ -117,8 +117,47 @@ def scenarios():
     return out
 
 
+GENERIC = {
+    "dentists": "Hi Doctor, want to run a discount campaign today to increase sales?",
+    "salons": "Hi! Want to run a 20% off offer this week to get more customers?",
+    "restaurants": "Hello! Boost your sales with a flat 30% discount this weekend?",
+    "gyms": "Hi, want to increase memberships with a special discount offer?",
+    "pharmacies": "Hi, want to run an offer to increase your sales?",
+}
+
+
+def _profile(m: dict, cat: dict, c: Optional[dict]) -> dict:
+    """Profile card data — shown verbatim from the context the bot received."""
+    ident, perf = m.get("identity", {}), m.get("performance", {})
+    peer = cat.get("peer_stats", {})
+    d7 = perf.get("delta_7d") or {}
+    kpis = []
+    for k, label in (("views", "Views"), ("calls", "Calls"), ("directions", "Directions")):
+        if perf.get(k) is not None:
+            delta = d7.get(f"{k}_pct")
+            kpis.append({"label": label, "value": f"{perf[k]:,}", "sub": (f"{delta * 100:+.0f}% 7d" if isinstance(delta, (int, float)) else "30 days")})
+    if perf.get("ctr") is not None:
+        kpis.append({"label": "CTR", "value": f"{perf['ctr'] * 100:.1f}%",
+                     "sub": f"peer {peer['avg_ctr'] * 100:.1f}%" if peer.get("avg_ctr") else "", "warn": bool(peer.get("avg_ctr") and perf["ctr"] < peer["avg_ctr"])})
+    prof = {"name": ident.get("name"), "owner": ident.get("owner_first_name"), "locality": ident.get("locality"), "city": ident.get("city"),
+            "category": cat.get("slug"), "languages": ident.get("languages"), "verified": ident.get("verified"),
+            "plan": f"{(m.get('subscription') or {}).get('plan', '')} · {(m.get('subscription') or {}).get('status', '')}",
+            "kpis": kpis, "offers": [{"title": o.get("title"), "status": o.get("status")} for o in m.get("offers", []) if isinstance(o, dict)][:3],
+            "reviews": [{"theme": r.get("theme", "").replace("_", " "), "sentiment": r.get("sentiment")} for r in m.get("review_themes", []) if isinstance(r, dict)][:3],
+            "signals": [s.replace("_", " ") for s in m.get("signals", []) if isinstance(s, str)][:4]}
+    if c:
+        rel, ci = c.get("relationship", {}), c.get("identity", {})
+        prof["customer"] = {"name": ci.get("name"), "language": ci.get("language_pref"), "state": (c.get("state") or "").replace("_", " "),
+                            "last_visit": rel.get("last_visit"), "visits": rel.get("visits_total"),
+                            "services": [s.replace("_", " ") for s in rel.get("services_received", []) if s != "..."][:3],
+                            "slots": ((c.get("preferences") or {}).get("preferred_slots") or "").replace("_", " "),
+                            "consent": [s.replace("_", " ") for s in (c.get("consent") or {}).get("scope", [])]}
+    return prof
+
+
 def _compose_payload(res, cat, m, t, c):
-    return {**res.output, "family": res.extras.get("family"), "language": res.extras.get("language"),
+    generic = "Hi! Visit us again and get 10% off. Hurry, limited time!" if c else GENERIC.get(cat.get("slug"), "Hi, want to run a discount to increase sales?")
+    return {**res.output, "profile": _profile(m, cat, c), "highlights": res.extras.get("highlights", []), "generic": generic, "family": res.extras.get("family"), "language": res.extras.get("language"),
             "scores": res.extras.get("scores"), "facts_used": res.extras.get("facts_used", [])[:8],
             "badges": _badges(res.output["body"], res, m, cat, c), "trigger_kind": t.get("kind"),
             "placeholder": bool((t.get("payload") or {}).get("placeholder"))}
@@ -341,6 +380,15 @@ form button{background:var(--accent);color:#fff;border:0;border-radius:20px;padd
 .bar{display:flex;align-items:center;gap:8px;font-size:12px;margin:3px 0}.bar i{flex:1;height:6px;background:var(--line);border-radius:3px;overflow:hidden}.bar i b{display:block;height:100%;background:var(--accent)}
 .pp{border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin:6px 0;font-size:12.5px}.pp b{display:block;font-size:13px}
 code{font-size:11px;word-break:break-all}
+.card{background:var(--panel);border-bottom:1px solid var(--line);padding:12px 16px;display:grid;grid-template-columns:auto 1fr;gap:4px 14px}
+.av{width:46px;height:46px;border-radius:50%;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:17px;grid-row:span 3}
+.card .nm{font-weight:700;font-size:15px}.card .mt{color:var(--muted);font-size:12px}
+.kpis{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}.kpi{border:1px solid var(--line);border-radius:8px;padding:4px 10px;min-width:78px}.kpi b{display:block;font-size:15px}.kpi span{font-size:11px;color:var(--muted)}.kpi.warn b{color:var(--badink)}
+.tags{display:flex;gap:5px;flex-wrap:wrap;margin-top:4px}.tg{font-size:11px;padding:2px 8px;border-radius:10px;background:var(--chip);color:var(--ink)}.tg.neg{background:var(--bad);color:var(--badink)}.tg.pos{background:var(--good);color:var(--goodink)}.tg.off{opacity:.55;text-decoration:line-through}
+mark{border-radius:4px;padding:0 2px;cursor:help;color:inherit}mark.merchant{background:rgba(0,168,132,.22)}mark.trigger{background:rgba(59,130,246,.24)}mark.category{background:rgba(168,85,247,.22)}mark.customer{background:rgba(245,158,11,.28)}mark.derived{background:rgba(120,120,120,.2)}
+.legend{display:flex;gap:10px;flex-wrap:wrap;font-size:11px;color:var(--muted);margin:2px 0 8px}.legend mark{font-size:11px}
+.cmp{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:14px 0}.cmp>div{border-radius:10px;padding:10px 12px;background:var(--panel);border:1px solid var(--line)}.cmp h5{margin:0 0 6px;font-size:11px;text-transform:uppercase;letter-spacing:.05em}.cmp .g h5{color:var(--badink)}.cmp .y h5{color:var(--goodink)}.cmp p{margin:0 0 6px;font-size:13.5px}
+@media (max-width:700px){.cmp{grid-template-columns:1fr}}
 @media (max-width:1000px){.wrap{grid-template-columns:1fr;height:auto}aside{max-height:40vh}main{height:75vh}.info{border-left:0;border-top:1px solid var(--line)}}
 </style></head><body>
 <div class="top"><div><b>Vera — multi-agent demo</b><div class="sub">Real pipeline · official dataset · every fact verified against context</div></div><div class="sp"></div>
@@ -348,7 +396,7 @@ code{font-size:11px;word-break:break-all}
 <div class="wrap">
 <aside><div class="tabs"><button data-t="sc" class="on">30 test scenarios</button><button data-t="rp">Judge replays</button><button data-t="wk">Weekly plan</button></div><div id="side"></div></aside>
 <main>
- <div class="head"><b id="who">Pick a scenario, a judge replay, or a weekly plan</b><span id="sub">Vera writes the first message; you reply as the merchant (or customer).</span></div>
+ <div id="card"></div><div class="head"><b id="who">Pick a scenario, a judge replay, or a weekly plan</b><span id="sub">Vera writes the first message; you reply as the merchant (or customer).</span></div>
  <div id="log"></div><div class="quick" id="quick"></div>
  <form id="f"><input id="in" placeholder="Reply…" autocomplete="off" disabled><button id="send" disabled>Send</button></form>
 </main>
@@ -362,6 +410,16 @@ const PAINS=[["Auto-reply pollution","Canned replies detected by phrasing + verb
 function esc(s){return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
 function add(text,cls,meta){const d=document.createElement('div');d.className='m '+cls;d.textContent=text;if(meta){const s=document.createElement('span');s.className='meta';s.textContent=meta;d.appendChild(s)}$('#log').appendChild(d);$('#log').scrollTop=1e9;return d}
 function sys(t,cls){const d=document.createElement('div');d.className=cls||'sys';d.textContent=t;$('#log').appendChild(d);$('#log').scrollTop=1e9}
+function hl(text,spans){const t=String(text);const taken=new Array(t.length).fill(false);const marks=[];
+ (spans||[]).forEach(s=>{let i=t.indexOf(s.text);while(i>=0){let free=true;for(let k=i;k<i+s.text.length;k++)if(taken[k]){free=false;break}
+  if(free){for(let k=i;k<i+s.text.length;k++)taken[k]=true;marks.push([i,i+s.text.length,s]);break}i=t.indexOf(s.text,i+1)}});
+ marks.sort((a,b)=>a[0]-b[0]);let out='',p=0;marks.forEach(([a,b,s])=>{out+=esc(t.slice(p,a))+`<mark class="${s.layer}" title="${esc(s.source)}">${esc(t.slice(a,b))}</mark>`;p=b});return out+esc(t.slice(p))}
+function card(p){if(!p){$('#card').innerHTML='';return}const ini=(p.owner||p.name||'?').replace(/^Dr\.?\s*/,'').slice(0,2).toUpperCase();
+ const cu=p.customer;let h=`<div class="av">${esc(ini)}</div><div><span class="nm">${esc(p.name)}</span> <span class="mt">· ${esc(p.category)} · ${esc(p.locality||'')}, ${esc(p.city||'')} · ${p.verified?'✔ verified':'not verified'} · ${esc(p.plan)} · speaks ${esc((p.languages||[]).join(', '))}</span></div>`;
+ h+=`<div class="kpis">${p.kpis.map(k=>`<div class="kpi${k.warn?' warn':''}"><b>${esc(k.value)}</b><span>${esc(k.label)} · ${esc(k.sub)}</span></div>`).join('')}</div>`;
+ h+=`<div class="tags">${p.offers.map(o=>`<span class="tg${o.status==='active'?'':' off'}">🏷 ${esc(o.title)}</span>`).join('')}${p.reviews.map(r=>`<span class="tg ${r.sentiment==='pos'?'pos':r.sentiment==='neg'?'neg':''}">★ ${esc(r.theme)}</span>`).join('')}${p.signals.map(s=>`<span class="tg">⚑ ${esc(s)}</span>`).join('')}</div>`;
+ if(cu)h+=`<div></div><div class="tags"><span class="tg" style="background:#fff3d6;color:#8a5a00">👤 Customer: ${esc(cu.name)} · ${esc(cu.state)} · ${cu.visits||0} visits · last ${esc(cu.last_visit||'')}${cu.slots?' · prefers '+esc(cu.slots):''} · lang ${esc(cu.language||'')}</span><span class="tg pos">✓ consent: ${esc((cu.consent||[]).join(', ')||'none')}</span></div>`;
+ $('#card').innerHTML=`<div class="card">${h}</div>`}
 function enable(on){$('#in').disabled=!on;$('#send').disabled=!on}
 async function post(u,b){return (await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)})).json()}
 function pains(extra){return '<h2>Production pain points → how this bot handles them</h2>'+PAINS.map(p=>`<div class="pp"><b>${p[0]}</b>${p[1]}${p[2]?` <a href="#" onclick="${p[2]=='week'?"tab('wk');return false":"runReplay('"+p[2]+"');return false"}">See it →</a>`:''}</div>`).join('')+(extra||'')}
@@ -381,8 +439,11 @@ function tab(t){TAB=t;document.querySelectorAll('.tabs button').forEach(b=>b.cla
 async function start(x){cur=x;side();$('#log').innerHTML='';enable(false);$('#quick').innerHTML='';
  $('#who').textContent=x.id+' · '+x.merchant;$('#sub').textContent=(x.audience==='customer'?'Sent to customer '+(x.to||'')+' on behalf of the merchant':'Vera → owner '+(x.to||''))+' · trigger: '+x.kind;
  sys('Running the agent pipeline…');const r=await post('/demo/api/start',{trigger_id:x.trigger_id,customer_id:x.customer_id,language:LANG});
- $('#log').innerHTML='';sid=r.session_id;const d=add(r.body,'v','cta='+r.cta+' · send_as='+r.send_as+' · language='+r.language);
+ $('#log').innerHTML='';sid=r.session_id;card(r.profile);
+ $('#log').insertAdjacentHTML('beforeend','<div class="legend">Highlighted = pulled from context (hover for the exact field): <mark class="merchant">this merchant</mark><mark class="trigger">today\'s trigger</mark><mark class="category">category knowledge</mark><mark class="customer">customer</mark><mark class="derived">computed</mark></div>');
+ const d=add('','v','cta='+r.cta+' · send_as='+r.send_as+' · language='+r.language);d.innerHTML=hl(r.body,r.highlights)+d.innerHTML;
  const b=document.createElement('div');b.className='badges';b.innerHTML=(r.badges||[]).map(x=>`<span class="bd${x.ok?'':' no'}">${x.ok?'✓':'✗'} ${esc(x.label)}</span>`).join('');d.after(b);
+ const nf=(r.highlights||[]).length;b.insertAdjacentHTML('afterend',`<div class="cmp"><div class="g"><h5>Typical generic message</h5><p>${esc(r.generic)}</p><div class="badges"><span class="bd no">✗ No trigger</span><span class="bd no">✗ No merchant fact</span><span class="bd no">✗ No category voice</span><span class="bd no">✗ Generic % off</span></div></div><div class="y"><h5>Vera — personalised</h5><p>${nf} facts from this merchant's context, written in ${({en:'English','hi-en':'Hinglish',hi:'Hindi'})[r.language]||r.language}, anchored on today's “${esc(r.trigger_kind.replace(/_/g,' '))}” trigger.</p><div class="badges">${(r.badges||[]).filter(x=>x.ok).slice(0,4).map(x=>`<span class="bd">✓ ${esc(x.label)}</span>`).join('')}</div></div></div>`);
  $('#in').placeholder=x.audience==='customer'?'Reply as the customer…':'Reply as the merchant…';enable(true);
  const langWhy=LANG==='hi'&&x.audience!=='customer'?'You chose हिन्दी. Devanagari is used for customer messages; merchant messages use Hinglish (Roman-script Hindi), the way owners text on WhatsApp.':LANG!=='auto'?'You chose '+LANG+'.':(x.audience==='customer'?'Auto: customer profile language_pref = '+(x.customer_lang||'n/a')+'.':'Auto: merchant profile languages = ['+(x.languages||[]).join(', ')+'] → '+(r.language==='hi-en'?'Hinglish (brief: code-mix preferred when “hi” is listed)':r.language)+'.');
  const sc=r.scores||{};$('#info').innerHTML='<h2>Why this message</h2><p>'+esc(r.rationale)+'</p><h2>Language</h2><p>'+esc(langWhy)+' Use the switch at the top to change it.</p>'+(r.placeholder?'<h2>No-payload trigger</h2><p>This test trigger carries no data, so Vera used only this merchant\'s own facts — nothing invented.</p>':'')+'<h2>Critic scores (0-10)</h2>'+Object.entries(sc).map(([k,v])=>`<div class="bar">${k.replace('_',' ')}<i><b style="width:${v*10}%"></b></i>${v}</div>`).join('')+
@@ -390,17 +451,17 @@ async function start(x){cur=x;side();$('#log').innerHTML='';enable(false);$('#qu
  (x.audience==='customer'?["1","YES","can I come on Saturday?","STOP"]:QUICK).forEach(q=>{const bt=document.createElement('button');bt.type='button';bt.textContent=q;bt.onclick=()=>send(q);$('#quick').appendChild(bt)})}
 async function send(text){if(!sid||!text.trim())return;add(text,'u');$('#in').value='';const r=await post('/demo/api/reply',{session_id:sid,message:text});
  if(r.error){sys(r.error);return}if(r.action==='send')add(r.body,'v',r.rationale);else if(r.action==='wait')sys('⏸ Vera waits '+Math.round(r.wait_seconds/60)+' min — '+r.rationale);else{sys('🔚 Conversation ended — '+r.rationale);enable(false)}}
-async function runReplay(name){sid=null;enable(false);$('#quick').innerHTML='';$('#log').innerHTML='';sys('Running judge replay…');
+async function runReplay(name){sid=null;card(null);enable(false);$('#quick').innerHTML='';$('#log').innerHTML='';sys('Running judge replay…');
  const r=await post('/demo/api/replay',{name,trigger_id:cur&&cur.audience==='merchant'?cur.trigger_id:null,language:LANG});$('#log').innerHTML='';
  $('#who').textContent='Judge replay · '+r.title;$('#sub').textContent=r.merchant+' · tests: '+r.pain;sys('Expected: '+r.expect);add(r.opening,'v','Vera opens');
  r.turns.forEach(t=>{add(t.merchant,'u','judge (as merchant)');if(t.action==='send')add(t.body,'v',t.rationale);else if(t.action==='wait')sys('⏸ wait '+Math.round(t.wait_seconds/60)+' min — '+t.rationale);else sys('🔚 end — '+t.rationale)});
  sys((r.pass?'✅ PASS — ':'❌ FAIL — ')+r.verdict,'verdict '+(r.pass?'pass':'fail'));
  $('#info').innerHTML='<h2>Replay test</h2><p><b>'+esc(r.title)+'</b>: '+esc(r.expect)+'</p><p>Result: <b>'+(r.pass?'PASS':'FAIL')+'</b> — '+esc(r.verdict)+'</p>'+pains()}
-async function runInject(){sid=null;enable(false);$('#quick').innerHTML='';$('#log').innerHTML='';sys('Injecting new context…');
+async function runInject(){sid=null;card(null);enable(false);$('#quick').innerHTML='';$('#log').innerHTML='';sys('Injecting new context…');
  const r=await post('/demo/api/inject',{language:LANG});$('#log').innerHTML='';$('#who').textContent='Post-submission context injection';$('#sub').textContent='Same merchants, before vs after the judge pushes new data';
  r.steps.forEach(s=>{$('#log').insertAdjacentHTML('beforeend',`<div class="sys"><b>${esc(s.what)}</b></div>`);add(s.before,'v','BEFORE');add(s.after,'v','AFTER — adapted, nothing invented')});
  $('#info').innerHTML='<h2>What the judge does</h2><p>After submission it pushes new digest items, updated performance, new triggers, and customer contexts for 5 pairs. Bots that adapt without hallucinating score higher.</p><h2>What changed here</h2><ul><li>New research item → cited with its source, n and next step</li><li>New numbers → message recomputed, old numbers gone</li><li>Customer added → message re-addressed to the customer; competitor intel withheld</li></ul>'+pains()}
-async function week(x){sid=null;enable(false);$('#quick').innerHTML='';$('#log').innerHTML='';sys('Planning a week of conversations…');
+async function week(x){sid=null;card(null);enable(false);$('#quick').innerHTML='';$('#log').innerHTML='';sys('Planning a week of conversations…');
  const r=await post('/demo/api/portfolio',{merchant_id:x.merchant_id,language:LANG});$('#log').innerHTML='';
  $('#who').textContent='Weekly plan · '+r.merchant;$('#sub').textContent='Different conversation types, not just reminders';
  r.week.forEach(w=>$('#log').insertAdjacentHTML('beforeend',`<div class="day"><h4>${w.day} · ${esc(w.kind)} <small>· ${esc(w.group)} · ${esc(w.source)}</small></h4>${esc(w.body).replace(/\n/g,'<br>')}</div>`));
