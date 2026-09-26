@@ -215,9 +215,15 @@ if FastAPI is not None:
         received_at: Optional[str] = None
         turn_number: Optional[int] = None
 
+    try:
+        from demo_ui import router as _demo_router
+        app.include_router(_demo_router)
+    except Exception:  # demo is optional; the judge contract never depends on it
+        pass
+
     @app.get("/")
     def root():
-        return {"service": "Vera agentic bot", "status": "ok",
+        return {"service": "Vera agentic bot", "status": "ok", "chat_demo": "/demo",
                 "endpoints": ["GET /v1/healthz", "GET /v1/metadata", "POST /v1/context", "POST /v1/tick",
                               "POST /v1/reply", "POST /v1/teardown"]}
 
