@@ -461,7 +461,7 @@ def r_competitor(b: Brief) -> Parts:
 def r_trend(b: Brief) -> Parts:
     q, d = b.A("query"), b.A("delta")
     yoy = b.t(" year-on-year", " saal-dar-saal") if (b.ta.anchor.get("delta", {}).get("path") or "").endswith("yoy") else ""
-    seg = b.A("segment")
+    seg = b.A("segment") if str(b.Araw("segment") or "").lower() not in ("all", "any", "") else None
     hook = b.t(f"{b.sal()}, searches for “{q}” are up {d}{yoy}" + (f" (mostly age {seg})." if seg else "."),
                f"{b.sal()}, “{q}” ki searches{yoy} {d} badh gayi hain" + (f" (zyada tar {seg} age group)." if seg else "."))
     levers = {"social_proof": b.t("That's real demand building in your category.", "Aapki category mein demand clearly badh rahi hai.")}

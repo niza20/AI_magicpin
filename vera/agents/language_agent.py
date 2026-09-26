@@ -30,10 +30,12 @@ class LanguageAgent(Agent):
     name = "language_agent"
 
     def run(self, tools: ContextTools, prof: CategoryProfile, customer_facing: bool,
-            latest_reply: Optional[str] = None) -> LanguagePlan:
+            latest_reply: Optional[str] = None, override: Optional[str] = None) -> LanguagePlan:
         source = "default"
         lang: Optional[str] = None
-        if latest_reply:
+        if override in ("en", "hi-en", "hi"):
+            lang, source = override, "explicit user choice"
+        if not lang and latest_reply:
             lang, source = detect_language(latest_reply), "latest reply"
         if not lang and customer_facing:
             lang, source = normalise_pref(tools.get_customer_fact("identity.language_pref")
@@ -51,7 +53,7 @@ class LanguageAgent(Agent):
                         break
         if not lang:
             lang, source = "en", "default"
-        if lang == "hi" and not customer_facing:
+        if lang == "hi" and not customer_facing and source != "explicit user choice":
             lang = "hi-en"   # Roman Hinglish reads most naturally for merchants on WhatsApp
         rules = {
             "en": ["plain Indian English", "short sentences"],

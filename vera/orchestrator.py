@@ -62,7 +62,7 @@ class Orchestrator:
         self.budget_s = budget_s
 
     def analyze(self, category: dict, merchant: dict, trigger: dict, customer: Optional[dict] = None,
-                latest_reply: Optional[str] = None, trace: Optional[list] = None) -> dict:
+                latest_reply: Optional[str] = None, trace: Optional[list] = None, language: Optional[str] = None) -> dict:
         """Understanding-only pass (no drafting) reused by the multi-turn handler as working memory."""
         trace = trace if trace is not None else []
         ledger, tools, _ = ContextAnalyst(trace).run(category, merchant, trigger, customer)
@@ -70,14 +70,14 @@ class Orchestrator:
         prof = CategoryExpert(trace).run(tools, ta)
         pers, pz = PersonalizationAgent(trace).run(tools, ta, prof)
         cust = CustomerAgent(trace).run(tools, ta) if customer else None
-        lang = LanguageAgent(trace).run(tools, prof, customer_facing=bool(customer), latest_reply=latest_reply)
+        lang = LanguageAgent(trace).run(tools, prof, customer_facing=bool(customer), latest_reply=latest_reply, override=language)
         plans = StrategyPlanner(trace).run(ta, IntentRouter(trace).initial(ta), pers, pz, prof, cust, lang.language)
         return {"ledger": ledger, "tools": tools, "ta": ta, "prof": prof, "pz": pz, "cust": cust, "lang": lang,
                 "plans": plans, "trace": trace}
 
     def compose(self, category: dict, merchant: dict, trigger: dict, customer: Optional[dict] = None,
                 now: Optional[str] = None, previous_bodies: Optional[list[str]] = None,
-                deadline: Optional[float] = None) -> ComposeResult:
+                deadline: Optional[float] = None, language: Optional[str] = None) -> ComposeResult:
         trace: list[TraceStep] = []
         deadline = deadline or (time.monotonic() + self.budget_s)
         state = "CONTEXT"
@@ -100,7 +100,7 @@ class Orchestrator:
         else:
             log("CUSTOMER", "skipped (no CustomerContext)")
         state = "LANGUAGE"
-        lang = LanguageAgent(trace).run(tools, prof, customer_facing=bool(customer))
+        lang = LanguageAgent(trace).run(tools, prof, customer_facing=bool(customer), override=language)
         send_as = "merchant_on_behalf" if customer else "vera"
 
         if cust and not cust.consent_ok:

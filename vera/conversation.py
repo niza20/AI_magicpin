@@ -54,6 +54,7 @@ class ConversationState:
     previous_strategy: Optional[str] = None
     exit_state: Optional[str] = None                             # None | "ended" | "waiting"
     language: Optional[str] = None
+    language_locked: bool = False                                # user explicitly chose a language → don't auto-switch
     hostile_count: int = 0
     off_topic_count: int = 0
     objection_count: int = 0
@@ -113,7 +114,7 @@ class ReplyEngine:
         state.intents.append(intent.merchant_intent)
         state.merchant_intent = intent.merchant_intent
         lang_now = detect_language(message)
-        if lang_now and len(message.split()) >= 2:
+        if lang_now and len(message.split()) >= 2 and not state.language_locked:
             state.language = lang_now if not (lang_now == "hi" and not state.customer) else "hi-en"
         w = self._working(state, message)
         mi = intent.merchant_intent
