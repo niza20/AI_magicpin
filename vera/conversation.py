@@ -96,6 +96,13 @@ class ReplyEngine:
             if verdict.recommended_behavior == "clarify_once" and not state.clarify_attempted:
                 state.clarify_attempted = True
                 w = self._working(state, None)
+                if state.actions_requested:
+                    b = w["brief"]
+                    sal = "" if b.sal() == "Hi" else f" {b.sal()},"
+                    body = b.t(f"Looks like an auto-reply 🙂{sal} your draft is ready above — just reply GO to publish it, or send edits.",
+                               f"Lagta hai yeh auto-reply hai 🙂{sal} aapka draft upar ready hai — publish karne ke liye bas GO reply karein, ya edits bhejein.")
+                    return self._send(state, w, body, "binary_yes_stop",
+                                      f"Auto-reply detected ({verdict.reason}) after the action was delivered; reminding of the pending GO instead of re-pitching.")
                 return self._send(state, w, self._clarify_auto(w), "binary_yes_stop",
                                   f"Auto-reply detected ({verdict.reason}); one owner-directed nudge, will exit if it repeats.")
             state.exit_state = "ended"
