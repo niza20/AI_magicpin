@@ -1,0 +1,27 @@
+{
+  "customer_id": "c_002_rohit",
+  "merchant_id": "m_002_studio11",
+  "identity": {
+    "name": "Rohit",
+    "language_pref": "en"
+  },
+  "relationship": {
+    "first_visit": "2025-06-01",
+    "last_visit": "2026-03-20",
+    "visits_total": 6,
+    "services_received": [
+      "haircut"
+    ]
+  },
+  "state": "lapsed_soft",
+  "preferences": {
+    "preferred_slots": "weekend_morning"
+  },
+  "consent": {
+    "opted_in_at": "2025-06-01",
+    "scope": [
+      "promotions",
+      "appointment_reminders"
+    ]
+  }
+}

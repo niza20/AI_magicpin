@@ -1,0 +1,69 @@
+{
+  "slug": "salons",
+  "offer_catalog": [
+    {
+      "title": "Haircut @ ₹99",
+      "value": "99"
+    },
+    {
+      "title": "Hair Spa @ ₹499",
+      "value": "499"
+    },
+    {
+      "title": "Bridal Makeup Trial @ ₹999",
+      "value": "999"
+    }
+  ],
+  "voice": {
+    "tone": "warm_friendly_practical",
+    "vocab_allowed": [
+      "hair spa",
+      "keratin",
+      "balayage",
+      "blow-dry"
+    ],
+    "vocab_taboo": [
+      "guaranteed results",
+      "permanent"
+    ]
+  },
+  "peer_stats": {
+    "avg_rating": 4.3,
+    "avg_reviews": 140,
+    "avg_ctr": 0.042,
+    "scope": "hyderabad_unisex_salons"
+  },
+  "digest": [
+    {
+      "id": "d_sal_keratin",
+      "kind": "trend",
+      "title": "Keratin bookings up ahead of monsoon frizz season",
+      "source": "magicpin salon bookings index",
+      "summary": "Keratin and smoothening bookings typically rise in June-July."
+    }
+  ],
+  "patient_content_library": [
+    {
+      "id": "sc_001",
+      "title": "5-minute monsoon hair care routine",
+      "channel": "whatsapp"
+    }
+  ],
+  "seasonal_beats": [
+    {
+      "month_range": "Oct-Dec",
+      "note": "wedding and festive makeup rush"
+    },
+    {
+      "month_range": "Jun-Aug",
+      "note": "monsoon frizz treatments"
+    }
+  ],
+  "trend_signals": [
+    {
+      "query": "keratin treatment near me",
+      "delta_yoy": 0.41,
+      "segment_age": "22-35"
+    }
+  ]
+}

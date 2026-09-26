@@ -1,0 +1,44 @@
+{
+  "merchant_id": "m_005_apollocare",
+  "category_slug": "pharmacies",
+  "identity": {
+    "name": "CareWell Pharmacy",
+    "owner_first_name": "Suresh",
+    "city": "Mumbai",
+    "locality": "Dadar",
+    "place_id": "ChIJ_m_005_apollocare",
+    "verified": true,
+    "languages": [
+      "en",
+      "hi"
+    ]
+  },
+  "subscription": {
+    "status": "active",
+    "plan": "Pro",
+    "days_remaining": 82
+  },
+  "performance": {
+    "window_days": 30,
+    "views": 1750,
+    "calls": 88,
+    "ctr": 0.025
+  },
+  "offers": [
+    {
+      "id": "o1",
+      "title": "Free Home Delivery above ₹499",
+      "status": "active"
+    }
+  ],
+  "conversation_history": [],
+  "customer_aggregate": {
+    "total_unique_ytd": 2300,
+    "lapsed_180d_plus": 310
+  },
+  "signals": [
+    "refill_customers_high"
+  ],
+  "rating": 4.1,
+  "review_count": 44
+}

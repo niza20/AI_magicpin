@@ -1,0 +1,17 @@
+{
+  "id": "trg_006_competitor_meera",
+  "scope": "merchant",
+  "kind": "competitor_opened",
+  "source": "external",
+  "merchant_id": "m_001_drmeera",
+  "customer_id": null,
+  "payload": {
+    "competitor_name": "BrightSmile Dental",
+    "distance_km": 1.3,
+    "opened_on": "2026-09-22"
+  },
+  "urgency": 3,
+  "suppression_key": null,
+  "expires_at": "2026-10-10T00:00:00Z",
+  "detected_at": "2026-09-26T09:00:00Z"
+}

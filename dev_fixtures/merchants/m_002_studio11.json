@@ -1,0 +1,53 @@
+{
+  "merchant_id": "m_002_studio11",
+  "category_slug": "salons",
+  "identity": {
+    "name": "Studio11 Family Salon",
+    "owner_first_name": "Lakshmi",
+    "city": "Hyderabad",
+    "locality": "Kondapur",
+    "place_id": "ChIJ_m_002_studio11",
+    "verified": true,
+    "languages": [
+      "en",
+      "hi"
+    ]
+  },
+  "subscription": {
+    "status": "active",
+    "plan": "Pro",
+    "days_remaining": 82
+  },
+  "performance": {
+    "window_days": 30,
+    "views": 5120,
+    "calls": 64,
+    "directions": 120,
+    "ctr": 0.047,
+    "delta_7d": {
+      "views_pct": 0.28
+    }
+  },
+  "offers": [
+    {
+      "id": "o1",
+      "title": "Haircut @ ₹99",
+      "status": "active"
+    },
+    {
+      "id": "o2",
+      "title": "Hair Spa @ ₹499",
+      "status": "paused"
+    }
+  ],
+  "conversation_history": [],
+  "customer_aggregate": {
+    "total_unique_ytd": 1900,
+    "lapsed_180d_plus": 260
+  },
+  "signals": [
+    "stale_posts:9d"
+  ],
+  "rating": 4.9,
+  "review_count": 298
+}

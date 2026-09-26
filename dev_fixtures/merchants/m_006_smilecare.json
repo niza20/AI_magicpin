@@ -1,0 +1,48 @@
+{
+  "merchant_id": "m_006_smilecare",
+  "category_slug": "dentists",
+  "identity": {
+    "name": "SmileCare Dental Studio",
+    "owner_first_name": "Arjun",
+    "city": "Bengaluru",
+    "locality": "Indiranagar",
+    "place_id": "ChIJ_m_006_smilecare",
+    "verified": true,
+    "languages": [
+      "en"
+    ]
+  },
+  "subscription": {
+    "status": "active",
+    "plan": "Pro",
+    "days_remaining": 82
+  },
+  "performance": {
+    "window_days": 30,
+    "views": 1320,
+    "calls": 22,
+    "directions": 31,
+    "ctr": 0.034,
+    "delta_7d": {
+      "views_pct": -0.12,
+      "calls_pct": -0.41
+    }
+  },
+  "offers": [
+    {
+      "id": "o1",
+      "title": "Free Consultation",
+      "status": "active"
+    }
+  ],
+  "conversation_history": [],
+  "customer_aggregate": {
+    "total_unique_ytd": 310,
+    "lapsed_180d_plus": 41
+  },
+  "signals": [
+    "reviews_mention_wait_time"
+  ],
+  "rating": 4.3,
+  "review_count": 58
+}

@@ -1,0 +1,61 @@
+{
+  "slug": "gyms",
+  "offer_catalog": [
+    {
+      "title": "7-Day Trial @ ₹199",
+      "value": "199"
+    },
+    {
+      "title": "Quarterly Membership @ ₹4,999",
+      "value": "4999"
+    }
+  ],
+  "voice": {
+    "tone": "coach_motivational",
+    "vocab_allowed": [
+      "PT session",
+      "HIIT",
+      "strength block",
+      "retention"
+    ],
+    "vocab_taboo": [
+      "guaranteed weight loss",
+      "miracle"
+    ]
+  },
+  "peer_stats": {
+    "avg_rating": 4.5,
+    "avg_reviews": 95,
+    "avg_ctr": 0.038,
+    "scope": "pune_independent_gyms"
+  },
+  "digest": [
+    {
+      "id": "d_gym_retention",
+      "kind": "research",
+      "title": "Members with 2+ PT sessions in month 1 retain 2x longer",
+      "source": "IHRSA India brief 2026",
+      "summary": "Early personal-training touchpoints strongly predict 6-month retention."
+    }
+  ],
+  "patient_content_library": [
+    {
+      "id": "gc_001",
+      "title": "Beat-the-heat workout timing guide",
+      "channel": "whatsapp"
+    }
+  ],
+  "seasonal_beats": [
+    {
+      "month_range": "Jan-Feb",
+      "note": "new-year resolution sign-up spike"
+    }
+  ],
+  "trend_signals": [
+    {
+      "query": "hiit classes pune",
+      "delta_yoy": 0.28,
+      "segment_age": "24-38"
+    }
+  ]
+}

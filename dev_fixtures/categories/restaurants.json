@@ -1,0 +1,56 @@
+{
+  "slug": "restaurants",
+  "offer_catalog": [
+    {
+      "title": "Weekend Biryani Combo @ ₹249",
+      "value": "249"
+    },
+    {
+      "title": "Thali @ ₹179",
+      "value": "179"
+    }
+  ],
+  "voice": {
+    "tone": "operator_to_operator",
+    "vocab_allowed": [
+      "covers",
+      "AOV",
+      "delivery radius",
+      "footfall"
+    ],
+    "vocab_taboo": [
+      "world's best",
+      "guaranteed"
+    ]
+  },
+  "peer_stats": {
+    "avg_rating": 4.1,
+    "avg_reviews": 380,
+    "avg_ctr": 0.051,
+    "scope": "delhi_casual_dining"
+  },
+  "digest": [
+    {
+      "id": "d_res_fssai",
+      "kind": "regulation",
+      "title": "FSSAI makes hygiene rating display mandatory on menus",
+      "source": "FSSAI order 2026-09",
+      "effective_date": "2026-11-01",
+      "summary": "Outlets must show their hygiene rating on dine-in and online menus."
+    }
+  ],
+  "patient_content_library": [],
+  "seasonal_beats": [
+    {
+      "month_range": "Oct-Nov",
+      "note": "festive family dining and sweets orders peak"
+    }
+  ],
+  "trend_signals": [
+    {
+      "query": "biryani delivery late night",
+      "delta_yoy": 0.35,
+      "segment_age": "18-30"
+    }
+  ]
+}

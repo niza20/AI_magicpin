@@ -1,0 +1,20 @@
+{
+  "id": "trg_022_profile_glowup",
+  "scope": "merchant",
+  "kind": "gbp_profile_incomplete",
+  "source": "internal",
+  "merchant_id": "m_007_glowup",
+  "customer_id": null,
+  "payload": {
+    "missing_fields": [
+      "business_hours",
+      "description",
+      "photos"
+    ],
+    "completeness_pct": 0.625
+  },
+  "urgency": 2,
+  "suppression_key": null,
+  "expires_at": "2026-10-10T00:00:00Z",
+  "detected_at": "2026-09-26T09:00:00Z"
+}

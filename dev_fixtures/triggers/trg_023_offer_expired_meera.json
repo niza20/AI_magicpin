@@ -1,0 +1,16 @@
+{
+  "id": "trg_023_offer_expired_meera",
+  "scope": "merchant",
+  "kind": "offer_expired",
+  "source": "internal",
+  "merchant_id": "m_001_drmeera",
+  "customer_id": null,
+  "payload": {
+    "offer_id": "o2",
+    "status": "expired"
+  },
+  "urgency": 2,
+  "suppression_key": null,
+  "expires_at": "2026-10-10T00:00:00Z",
+  "detected_at": "2026-09-26T09:00:00Z"
+}

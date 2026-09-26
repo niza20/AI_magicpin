@@ -1,0 +1,17 @@
+{
+  "id": "trg_010_local_news_southspice",
+  "scope": "merchant",
+  "kind": "local_news_event",
+  "source": "external",
+  "merchant_id": "m_008_southspice",
+  "customer_id": null,
+  "payload": {
+    "headline": "Metro line work closes Usman Road",
+    "location": "Usman Road, T Nagar",
+    "duration_hours": 3
+  },
+  "urgency": 3,
+  "suppression_key": null,
+  "expires_at": "2026-10-10T00:00:00Z",
+  "detected_at": "2026-09-26T09:00:00Z"
+}

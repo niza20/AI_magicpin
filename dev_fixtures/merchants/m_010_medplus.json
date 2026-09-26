@@ -1,0 +1,38 @@
+{
+  "merchant_id": "m_010_medplus",
+  "category_slug": "pharmacies",
+  "identity": {
+    "name": "MedPoint Chemists",
+    "owner_first_name": "Farah",
+    "city": "Delhi",
+    "locality": "Saket",
+    "place_id": "ChIJ_m_010_medplus",
+    "verified": true,
+    "languages": [
+      "en"
+    ]
+  },
+  "subscription": {
+    "status": "active",
+    "plan": "Pro",
+    "days_remaining": 82
+  },
+  "performance": {
+    "window_days": 30,
+    "views": 900,
+    "calls": 40,
+    "ctr": 0.031
+  },
+  "offers": [
+    {
+      "id": "o1",
+      "title": "BP Check @ ₹49",
+      "status": "active"
+    }
+  ],
+  "conversation_history": [],
+  "customer_aggregate": {},
+  "signals": [],
+  "rating": 4.6,
+  "review_count": 52
+}

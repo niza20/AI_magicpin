@@ -1,0 +1,16 @@
+{
+  "customer_id": "c_004_nokonsent",
+  "merchant_id": "m_001_drmeera",
+  "identity": {
+    "name": "Kavya",
+    "language_pref": "en"
+  },
+  "relationship": {
+    "first_visit": "2025-01-10",
+    "last_visit": "2025-12-01",
+    "visits_total": 2
+  },
+  "state": "lapsed_hard",
+  "preferences": {},
+  "consent": {}
+}

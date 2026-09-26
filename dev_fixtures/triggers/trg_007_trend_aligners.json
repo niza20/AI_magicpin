@@ -1,0 +1,17 @@
+{
+  "id": "trg_007_trend_aligners",
+  "scope": "merchant",
+  "kind": "category_trend_movement",
+  "source": "external",
+  "merchant_id": "m_001_drmeera",
+  "customer_id": null,
+  "payload": {
+    "query": "clear aligners delhi",
+    "delta_yoy": 0.62,
+    "segment_age": "28-45"
+  },
+  "urgency": 2,
+  "suppression_key": null,
+  "expires_at": "2026-10-10T00:00:00Z",
+  "detected_at": "2026-09-26T09:00:00Z"
+}

@@ -1,0 +1,45 @@
+{
+  "merchant_id": "m_004_ironcore",
+  "category_slug": "gyms",
+  "identity": {
+    "name": "IronCore Fitness",
+    "owner_first_name": "Kabir",
+    "city": "Pune",
+    "locality": "Kothrud",
+    "place_id": "ChIJ_m_004_ironcore",
+    "verified": true,
+    "languages": [
+      "en",
+      "hi"
+    ]
+  },
+  "subscription": {
+    "status": "active",
+    "plan": "Pro",
+    "days_remaining": 82
+  },
+  "performance": {
+    "window_days": 30,
+    "views": 2100,
+    "calls": 30,
+    "ctr": 0.029
+  },
+  "offers": [
+    {
+      "id": "o1",
+      "title": "7-Day Trial @ ₹199",
+      "status": "active"
+    }
+  ],
+  "conversation_history": [],
+  "customer_aggregate": {
+    "total_unique_ytd": 380,
+    "lapsed_180d_plus": 95,
+    "retention_6mo_pct": 0.44
+  },
+  "signals": [
+    "stale_posts:14d"
+  ],
+  "rating": 4.7,
+  "review_count": 99
+}

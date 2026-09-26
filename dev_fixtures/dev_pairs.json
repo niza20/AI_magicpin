@@ -1,0 +1,161 @@
+{
+  "pairs": [
+    {
+      "test_id": "DEV01",
+      "merchant_id": "m_001_drmeera",
+      "trigger_id": "trg_001_research_dentists",
+      "customer_id": null
+    },
+    {
+      "test_id": "DEV02",
+      "merchant_id": "m_006_smilecare",
+      "trigger_id": "trg_002_regulation_dci",
+      "customer_id": null
+    },
+    {
+      "test_id": "DEV03",
+      "merchant_id": "m_006_smilecare",
+      "trigger_id": "trg_003_perf_dip_smilecare",
+      "customer_id": null
+    },
+    {
+      "test_id": "DEV04",
+      "merchant_id": "m_002_studio11",
+      "trigger_id": "trg_004_perf_spike_studio11",
+      "customer_id": null
+    },
+    {
+      "test_id": "DEV05",
+      "merchant_id": "m_002_studio11",
+      "trigger_id": "trg_005_milestone_studio11",
+      "customer_id": null
+    },
+    {
+      "test_id": "DEV06",
+      "merchant_id": "m_001_drmeera",
+      "trigger_id": "trg_006_competitor_meera",
+      "customer_id": null
+    },
+    {
+      "test_id": "DEV07",
+      "merchant_id": "m_001_drmeera",
+      "trigger_id": "trg_007_trend_aligners",
+      "customer_id": null
+    },
+    {
+      "test_id": "DEV08",
+      "merchant_id": "m_003_pizzajunction",
+      "trigger_id": "trg_008_diwali_pizza",
+      "customer_id": null
+    },
+    {
+      "test_id": "DEV09",
+      "merchant_id": "m_010_medplus",
+      "trigger_id": "trg_009_heatwave_pharmacy",
+      "customer_id": null
+    },
+    {
+      "test_id": "DEV10",
+      "merchant_id": "m_008_southspice",
+      "trigger_id": "trg_010_local_news_southspice",
+      "customer_id": null
+    },
+    {
+      "test_id": "DEV11",
+      "merchant_id": "m_006_smilecare",
+      "trigger_id": "trg_011_review_theme_smilecare",
+      "customer_id": null
+    },
+    {
+      "test_id": "DEV12",
+      "merchant_id": "m_007_glowup",
+      "trigger_id": "trg_012_dormant_glowup",
+      "customer_id": null
+    },
+    {
+      "test_id": "DEV13",
+      "merchant_id": "m_004_ironcore",
+      "trigger_id": "trg_013_scheduled_ironcore",
+      "customer_id": null
+    },
+    {
+      "test_id": "DEV14",
+      "merchant_id": "m_001_drmeera",
+      "trigger_id": "trg_014_recall_priya",
+      "customer_id": "c_001_priya"
+    },
+    {
+      "test_id": "DEV15",
+      "merchant_id": "m_002_studio11",
+      "trigger_id": "trg_015_lapsed_rohit",
+      "customer_id": "c_002_rohit"
+    },
+    {
+      "test_id": "DEV16",
+      "merchant_id": "m_002_studio11",
+      "trigger_id": "trg_016_appointment_sana",
+      "customer_id": "c_006_sana"
+    },
+    {
+      "test_id": "DEV17",
+      "merchant_id": "m_001_drmeera",
+      "trigger_id": "trg_017_recall_noconsent",
+      "customer_id": "c_004_nokonsent"
+    },
+    {
+      "test_id": "DEV18",
+      "merchant_id": "m_009_fitnation",
+      "trigger_id": "trg_018_renewal_fitnation",
+      "customer_id": null
+    },
+    {
+      "test_id": "DEV19",
+      "merchant_id": "m_008_southspice",
+      "trigger_id": "trg_019_perf_dip_southspice",
+      "customer_id": null
+    },
+    {
+      "test_id": "DEV20",
+      "merchant_id": "m_004_ironcore",
+      "trigger_id": "trg_020_research_gym",
+      "customer_id": null
+    },
+    {
+      "test_id": "DEV21",
+      "merchant_id": "m_005_apollocare",
+      "trigger_id": "trg_021_regulation_pharmacy",
+      "customer_id": null
+    },
+    {
+      "test_id": "DEV22",
+      "merchant_id": "m_007_glowup",
+      "trigger_id": "trg_022_profile_glowup",
+      "customer_id": null
+    },
+    {
+      "test_id": "DEV23",
+      "merchant_id": "m_001_drmeera",
+      "trigger_id": "trg_023_offer_expired_meera",
+      "customer_id": null
+    },
+    {
+      "test_id": "DEV24",
+      "merchant_id": "m_003_pizzajunction",
+      "trigger_id": "trg_024_unknown_kind",
+      "customer_id": null
+    },
+    {
+      "test_id": "DEV25",
+      "merchant_id": "m_005_apollocare",
+      "trigger_id": "trg_025_refill_imran",
+      "customer_id": "c_005_imran"
+    },
+    {
+      "test_id": "DEV26",
+      "merchant_id": "m_002_studio11",
+      "trigger_id": "trg_026_festival_salon",
+      "customer_id": null
+    }
+  ],
+  "note": "DEV pairs over synthetic fixtures \u2014 NOT the official 30 test pairs"
+}

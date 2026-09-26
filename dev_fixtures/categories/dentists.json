@@ -1,0 +1,85 @@
+{
+  "slug": "dentists",
+  "offer_catalog": [
+    {
+      "title": "Dental Cleaning @ ₹299",
+      "value": "299",
+      "audience": "new_user"
+    },
+    {
+      "title": "Free Consultation",
+      "value": "0",
+      "audience": "all"
+    },
+    {
+      "title": "Teeth Whitening @ ₹1,499",
+      "value": "1499",
+      "audience": "all"
+    }
+  ],
+  "voice": {
+    "tone": "peer_clinical",
+    "vocab_allowed": [
+      "fluoride varnish",
+      "caries",
+      "recall",
+      "scaling",
+      "aligners"
+    ],
+    "vocab_taboo": [
+      "cure",
+      "guaranteed",
+      "painless",
+      "best dentist"
+    ]
+  },
+  "peer_stats": {
+    "avg_rating": 4.4,
+    "avg_reviews": 62,
+    "avg_ctr": 0.03,
+    "scope": "delhi_solo_practices"
+  },
+  "digest": [
+    {
+      "id": "d_2026W17_jida_fluoride",
+      "kind": "research",
+      "title": "3-mo fluoride recall cuts caries 38% better than 6-mo",
+      "source": "JIDA Oct 2026, p.14",
+      "trial_n": 2100,
+      "patient_segment": "high_risk_adults",
+      "summary": "Multi-centre trial across 2,100 high-risk adults; 3-month fluoride varnish recall reduced caries recurrence 38% vs 6-month recall."
+    },
+    {
+      "id": "d_2026W17_dci_xray",
+      "kind": "regulation",
+      "title": "DCI revises radiograph dose limits for dental X-rays",
+      "source": "DCI circular 2026/14",
+      "effective_date": "2026-06-01",
+      "summary": "Clinics must log per-patient dose for every IOPA and OPG from 1 June."
+    }
+  ],
+  "patient_content_library": [
+    {
+      "id": "pc_001",
+      "title": "3 things your teeth tell you about your heart",
+      "channel": "whatsapp"
+    }
+  ],
+  "seasonal_beats": [
+    {
+      "month_range": "Nov-Feb",
+      "note": "exam-stress bruxism spike"
+    },
+    {
+      "month_range": "Oct-Dec",
+      "note": "wedding whitening peak"
+    }
+  ],
+  "trend_signals": [
+    {
+      "query": "clear aligners delhi",
+      "delta_yoy": 0.62,
+      "segment_age": "28-45"
+    }
+  ]
+}

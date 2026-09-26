@@ -1,0 +1,48 @@
+{
+  "merchant_id": "m_003_pizzajunction",
+  "category_slug": "restaurants",
+  "identity": {
+    "name": "Pizza Junction",
+    "owner_first_name": "Vikram",
+    "city": "Delhi",
+    "locality": "Karol Bagh",
+    "place_id": "ChIJ_m_003_pizzajunction",
+    "verified": true,
+    "languages": [
+      "en",
+      "hi"
+    ]
+  },
+  "subscription": {
+    "status": "active",
+    "plan": "Pro",
+    "days_remaining": 82
+  },
+  "performance": {
+    "window_days": 30,
+    "views": 8900,
+    "calls": 140,
+    "directions": 410,
+    "ctr": 0.044,
+    "delta_7d": {
+      "views_pct": 0.31,
+      "calls_pct": 0.12
+    }
+  },
+  "offers": [
+    {
+      "id": "o1",
+      "title": "Weekend Biryani Combo @ ₹249",
+      "status": "active"
+    }
+  ],
+  "conversation_history": [],
+  "customer_aggregate": {
+    "total_unique_ytd": 6100
+  },
+  "signals": [
+    "delivery_heavy"
+  ],
+  "rating": 4.2,
+  "review_count": 1204
+}

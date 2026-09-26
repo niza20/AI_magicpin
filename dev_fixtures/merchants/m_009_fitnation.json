@@ -1,0 +1,40 @@
+{
+  "merchant_id": "m_009_fitnation",
+  "category_slug": "gyms",
+  "identity": {
+    "name": "FitNation Studio",
+    "owner_first_name": "Priyanka",
+    "city": "Mumbai",
+    "locality": "Andheri West",
+    "place_id": "ChIJ_m_009_fitnation",
+    "verified": true,
+    "languages": [
+      "en"
+    ]
+  },
+  "subscription": {
+    "status": "active",
+    "plan": "Pro",
+    "days_remaining": 82
+  },
+  "performance": {
+    "window_days": 30,
+    "views": 1500,
+    "calls": 12,
+    "ctr": 0.031
+  },
+  "offers": [
+    {
+      "id": "o1",
+      "title": "Quarterly Membership @ ₹4,999",
+      "status": "active"
+    }
+  ],
+  "conversation_history": [],
+  "customer_aggregate": {
+    "total_unique_ytd": 260
+  },
+  "signals": [],
+  "rating": 4.5,
+  "review_count": 70
+}

@@ -1,0 +1,42 @@
+{
+  "merchant_id": "m_008_southspice",
+  "category_slug": "restaurants",
+  "identity": {
+    "name": "South Spice Kitchen",
+    "owner_first_name": "Anand",
+    "city": "Chennai",
+    "locality": "T Nagar",
+    "place_id": "ChIJ_m_008_southspice",
+    "verified": true,
+    "languages": [
+      "en"
+    ]
+  },
+  "subscription": {
+    "status": "active",
+    "plan": "Pro",
+    "days_remaining": 82
+  },
+  "performance": {
+    "window_days": 30,
+    "views": 3400,
+    "calls": 51,
+    "directions": 205,
+    "ctr": 0.039,
+    "delta_7d": {
+      "calls_pct": -0.22
+    }
+  },
+  "offers": [
+    {
+      "id": "o1",
+      "title": "Thali @ ₹179",
+      "status": "active"
+    }
+  ],
+  "conversation_history": [],
+  "customer_aggregate": {},
+  "signals": [],
+  "rating": 4.4,
+  "review_count": 610
+}

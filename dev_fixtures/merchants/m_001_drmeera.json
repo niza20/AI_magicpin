@@ -1,0 +1,70 @@
+{
+  "merchant_id": "m_001_drmeera",
+  "category_slug": "dentists",
+  "identity": {
+    "name": "Dr. Meera's Dental Clinic",
+    "owner_first_name": "Meera",
+    "city": "Delhi",
+    "locality": "Lajpat Nagar",
+    "place_id": "ChIJ_m_001_drmeera",
+    "verified": true,
+    "languages": [
+      "en",
+      "hi"
+    ]
+  },
+  "subscription": {
+    "status": "active",
+    "plan": "Pro",
+    "days_remaining": 82
+  },
+  "performance": {
+    "window_days": 30,
+    "views": 2410,
+    "calls": 18,
+    "directions": 45,
+    "ctr": 0.021,
+    "delta_7d": {
+      "views_pct": 0.18,
+      "calls_pct": -0.05
+    }
+  },
+  "offers": [
+    {
+      "id": "o1",
+      "title": "Dental Cleaning @ ₹299",
+      "status": "active"
+    },
+    {
+      "id": "o2",
+      "title": "Deep Cleaning @ ₹499",
+      "status": "expired"
+    }
+  ],
+  "conversation_history": [
+    {
+      "ts": "2026-04-24T10:00:00Z",
+      "from": "vera",
+      "body": "Your profile got 2,410 views this month.",
+      "engagement": "merchant_replied"
+    },
+    {
+      "ts": "2026-04-24T10:05:00Z",
+      "from": "merchant",
+      "body": "Haan dekha, thik hai",
+      "engagement": "replied"
+    }
+  ],
+  "customer_aggregate": {
+    "total_unique_ytd": 540,
+    "lapsed_180d_plus": 78,
+    "retention_6mo_pct": 0.38
+  },
+  "signals": [
+    "stale_posts:22d",
+    "ctr_below_peer_median",
+    "high_risk_adult_cohort"
+  ],
+  "rating": 4.6,
+  "review_count": 112
+}

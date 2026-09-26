@@ -1,0 +1,26 @@
+{
+  "customer_id": "c_005_imran",
+  "merchant_id": "m_005_apollocare",
+  "identity": {
+    "name": "Imran",
+    "language_pref": "hi-en"
+  },
+  "relationship": {
+    "first_visit": "2025-02-02",
+    "last_visit": "2026-08-28",
+    "visits_total": 12,
+    "services_received": [
+      "bp medicine refill"
+    ]
+  },
+  "state": "active",
+  "preferences": {
+    "preferred_slots": "evening"
+  },
+  "consent": {
+    "opted_in_at": "2025-02-02",
+    "scope": [
+      "refill_reminders"
+    ]
+  }
+}

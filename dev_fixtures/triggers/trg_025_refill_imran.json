@@ -1,0 +1,16 @@
+{
+  "id": "trg_025_refill_imran",
+  "scope": "customer",
+  "kind": "refill_due",
+  "source": "internal",
+  "merchant_id": "m_005_apollocare",
+  "customer_id": "c_005_imran",
+  "payload": {
+    "last_visit": "2026-08-28",
+    "service": "bp_medicine_refill"
+  },
+  "urgency": 3,
+  "suppression_key": null,
+  "expires_at": "2026-10-10T00:00:00Z",
+  "detected_at": "2026-09-26T09:00:00Z"
+}

@@ -1,0 +1,23 @@
+{
+  "customer_id": "c_003_anita",
+  "merchant_id": "m_004_ironcore",
+  "identity": {
+    "name": "Anita",
+    "language_pref": "hi"
+  },
+  "relationship": {
+    "first_visit": "2026-01-10",
+    "last_visit": "2026-08-01",
+    "visits_total": 40
+  },
+  "state": "lapsed_soft",
+  "preferences": {
+    "preferred_slots": "early_morning"
+  },
+  "consent": {
+    "opted_in_at": "2026-01-10",
+    "scope": [
+      "membership_reminders"
+    ]
+  }
+}

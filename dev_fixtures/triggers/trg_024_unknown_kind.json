@@ -1,0 +1,17 @@
+{
+  "id": "trg_024_unknown_kind",
+  "scope": "merchant",
+  "kind": "upi_settlement_delayed",
+  "source": "internal",
+  "merchant_id": "m_003_pizzajunction",
+  "customer_id": null,
+  "payload": {
+    "amount": 18450,
+    "delay_days": 2,
+    "bank": "HDFC"
+  },
+  "urgency": 3,
+  "suppression_key": null,
+  "expires_at": "2026-10-10T00:00:00Z",
+  "detected_at": "2026-09-26T09:00:00Z"
+}

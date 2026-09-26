@@ -1,0 +1,16 @@
+{
+  "id": "trg_005_milestone_studio11",
+  "scope": "merchant",
+  "kind": "milestone_reached",
+  "source": "internal",
+  "merchant_id": "m_002_studio11",
+  "customer_id": null,
+  "payload": {
+    "metric": "reviews",
+    "value": 300
+  },
+  "urgency": 2,
+  "suppression_key": null,
+  "expires_at": "2026-10-10T00:00:00Z",
+  "detected_at": "2026-09-26T09:00:00Z"
+}

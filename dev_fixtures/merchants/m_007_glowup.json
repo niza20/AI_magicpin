@@ -1,0 +1,37 @@
+{
+  "merchant_id": "m_007_glowup",
+  "category_slug": "salons",
+  "identity": {
+    "name": "GlowUp Unisex Salon",
+    "owner_first_name": "Rohan",
+    "city": "Pune",
+    "locality": "Baner",
+    "place_id": "ChIJ_m_007_glowup",
+    "verified": true,
+    "languages": [
+      "en"
+    ]
+  },
+  "subscription": {
+    "status": "active",
+    "plan": "Pro",
+    "days_remaining": 82
+  },
+  "performance": {
+    "window_days": 30,
+    "views": 980,
+    "calls": 9,
+    "ctr": 0.022
+  },
+  "offers": [],
+  "conversation_history": [],
+  "customer_aggregate": {
+    "total_unique_ytd": 420
+  },
+  "signals": [
+    "no_active_offer",
+    "stale_posts:31d"
+  ],
+  "rating": 4.0,
+  "review_count": 37
+}

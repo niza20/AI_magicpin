@@ -1,0 +1,67 @@
+{
+  "slug": "pharmacies",
+  "offer_catalog": [
+    {
+      "title": "Free Home Delivery above ₹499",
+      "value": "499"
+    },
+    {
+      "title": "BP Check @ ₹49",
+      "value": "49"
+    }
+  ],
+  "voice": {
+    "tone": "trustworthy_precise",
+    "vocab_allowed": [
+      "refill",
+      "generic substitute",
+      "cold chain"
+    ],
+    "vocab_taboo": [
+      "cure",
+      "guaranteed",
+      "miracle",
+      "no side effects"
+    ]
+  },
+  "peer_stats": {
+    "avg_rating": 4.2,
+    "avg_reviews": 48,
+    "avg_ctr": 0.027,
+    "scope": "mumbai_neighbourhood_chemists"
+  },
+  "digest": [
+    {
+      "id": "d_ph_schedule_h1",
+      "kind": "regulation",
+      "title": "Schedule H1 register audits tightened in Maharashtra",
+      "source": "FDA Maharashtra notice 2026/31",
+      "effective_date": "2026-10-15",
+      "summary": "Inspectors will check H1 registers for prescriber details on every sale."
+    }
+  ],
+  "patient_content_library": [
+    {
+      "id": "ph_001",
+      "title": "How to store insulin in summer",
+      "channel": "whatsapp"
+    }
+  ],
+  "seasonal_beats": [
+    {
+      "month_range": "Apr-Jun",
+      "note": "heat-related ORS and electrolyte demand"
+    },
+    {
+      "month_range": "Jul-Sep",
+      "note": "monsoon fever and dengue test demand"
+    }
+  ],
+  "trend_signals": [
+    {
+      "query": "dengue test near me",
+      "delta_yoy": 0.55,
+      "segment_age": "25-50"
+    }
+  ]
+}
