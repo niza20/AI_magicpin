@@ -60,6 +60,10 @@ class CustomerAgent(Agent):
             return True, f"scope covers purpose ({', '.join(scopes)})"
         reminder_ok = prefs.get("reminder_opt_in") is True
         transactional = family in ("customer_appointment", "customer_recall")
+        if family == "customer_promo":
+            if any(any(p in s for p in ("promot", "offer", "marketing", "special", "updates")) for s in scopes):
+                return True, f"promotional consent ({', '.join(scopes)})"
+            return False, f"consent covers only {', '.join(scopes) or 'nothing'}, not promotional messages"
         if transactional and reminder_ok and scopes:
             return True, f"opted in ({', '.join(scopes)}) with reminder_opt_in=true"
         if family == "customer_recall" and any(any(p in s for p in ("promot", "offer", "marketing")) for s in scopes):

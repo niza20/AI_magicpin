@@ -19,7 +19,7 @@ _HINGLISH = {"hai", "hain", "nahi", "nahin", "kya", "karo", "kar", "mujhe", "aap
 
 _STOP = re.compile(r"\b(stop|unsubscribe|opt[\s-]?out|spam|don'?t (message|msg|text|contact|call)|do not (message|msg|text|contact)|"
                    r"stop (messaging|texting|sending)|band karo|mat bhejo|message mat|remove me|block)\b")
-_ABUSE = re.compile(r"\b(idiot|stupid|useless|nonsense|bakwas|bakwaas|bewakoof|chutiya|pagal|shut up|chup|fraud|scam|"
+_ABUSE = re.compile(r"\b(idiot|stupid|useless|nonsense|bakwas|bakwaas|bewakoof|chutiya|pagal|shut up|chup|"
                     r"harass\w*|irritat\w*|pareshan|faltu|rubbish|waste of time|go to hell)\b")
 _NOT_INTERESTED = re.compile(r"\b(not interested|no interest|interest nahi|nahi chahiye|nahin chahiye|no thanks|no thank you|"
                              r"don'?t need|dont want|don'?t want|no need|zarurat nahi|zaroorat nahi|mat karo|not required|"
@@ -36,11 +36,27 @@ _OFF_TOPIC = re.compile(r"\b(gst|income tax|itr|tax filing|file (my )?tax|loan|v
 _OBJECTION = re.compile(r"\b(too expensive|expensive|mehenga|mehnga|costly|no budget|budget nahi|doesn'?t work|does not work|"
                         r"not useful|no use|koi fayda nahi|already (have|doing|tried)|pehle se|tried before|"
                         r"didn'?t work|waste|no results|not convinced|trust nahi)\b")
-_PRICE = re.compile(r"\b(how much|kitna|kitne|price|pricing|cost|charges?|fees?|rate|paisa|paise|rs\.?|₹)\b")
+_PRICE = re.compile(r"\b(how much|kitna|price|pricing|cost|charges?|fees?|rate|paisa|paise|rs\.?|₹)\b")
 _QUESTION = re.compile(r"\?|^\s*(what|how|why|when|where|which|who|can you|could you|is it|are you|do you|kya|kaise|kyun|kab|"
                        r"kahan|kaun|kaunsa)\b")
 _INTERESTED = re.compile(r"\b(interesting|tell me more|more details|details|batao|bataiye|sounds interesting|hmm+|achha|accha|"
                          r"acha|nice|good|great|cool|really|sach mein|go on)\b")
+# curveball topics the judge's merchant-simulator plausibly throws in replays
+_IDENTITY = re.compile(r"\b(who are you|who is this|who r u|kaun (ho|hai|bol)|aap kaun|are you (a |an )?(bot|robot|human|real person|ai)|"
+                       r"(are you |you are )?from google|google se|are you from magicpin|magicpin se (ho|hai)|what is vera)\b")
+_TRUST = re.compile(r"\b(scam|fraud|fake|genuine|legit|trust|real data|sach hai|bharosa|how do you know|where (is|does) (this|the|your) data|"
+                    r"data kahan se|kahan se pata|what('?s| is) the source|proof)\b")
+_CALLBACK = re.compile(r"\b(call me|phone me|give me a call|mujhe call|call karo|call kar ?(do|na|dijiye)|baat karni hai|"
+                       r"talk to (a |an )?(human|person|someone|executive|agent))\b")
+_DELEGATE = re.compile(r"\b(my (son|daughter|nephew|niece|brother|sister|manager|staff|assistant|partner|accountant|team|husband|wife|receptionist)|"
+                       r"handles? (my|it|the|this)|manages? (my|it|the)|dekhta hai|dekhti hai|sambhalta hai|sambhalti hai)\b")
+_ALREADY = re.compile(r"\b(already (posted|did|done|doing|have|running|put|shared|sent)|pehle se|kar (diya|chuka|chuki)|"
+                      r"posted (it )?(on|yesterday|today)|on instagram|on facebook)\b")
+_OUTCOME = re.compile(r"\b(how many (customers|calls|people|patients|clients|members|orders)|kitne (customers|log|patients|calls|clients|orders)|"
+                      r"guarantee|results?|will (it|this) (work|help)|kya fayda|what will i get|roi|is it worth)\b")
+_GLOSSARY = re.compile(r"(what('?s| is| does)( a| the)? (ctr|gbp|click[- ]?through|seo|cde|google post|verification|peer benchmark|benchmark)\b|"
+                       r"\b(ctr|gbp|cde|seo)\b.*\b(kya|matlab|mean)\b|\bmatlab kya\b)")
+_BILLING = re.compile(r"\b(commission|refund|invoice|billing|payout|settlement|deduction)\b")
 _WAIT_LONG = re.compile(r"\b(tomorrow|kal|next week)\b")
 
 _AUTO_PATTERNS = re.compile(
@@ -122,6 +138,17 @@ class IntentRouter(Agent):
         if _NOT_INTERESTED.search(low) and not re.search(r"\b(yes|haan|ok)\b", low):
             sig.append("not-interested phrase")
             return res("EXIT", "not_interested", 0.9)
+        for rx, intent, mode, why in ((_IDENTITY, "identity", "INFORM", "asks who Vera is"),
+                                      (_TRUST, "trust", "RECOVER", "questions trust / data source"),
+                                      (_CALLBACK, "callback", "ACT", "wants a human call"),
+                                      (_BILLING, "billing", "INFORM", "billing / commission request"),
+                                      (_OUTCOME, "outcome", "INFORM", "asks what results to expect"),
+                                      (_GLOSSARY, "glossary", "INFORM", "asks what a term means"),
+                                      (_DELEGATE, "delegate", "ACT", "someone else handles it"),
+                                      (_ALREADY, "already_done", "RECOVER", "says it's already done")):
+            if rx.search(low) and not _ABUSE.search(low) and not (intent == "callback" and _LATER.search(low)):
+                sig.append(why)
+                return res(mode, intent, 0.85)
         abusive = bool(_ABUSE.search(low))
         off_topic = bool(_OFF_TOPIC.search(low))
         if abusive:

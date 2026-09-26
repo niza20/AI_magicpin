@@ -108,3 +108,37 @@ def test_repeated_identical_merchant_messages_become_auto_reply():
     assert r["action"] in ("send", "end")
     r3 = respond(st, "ok noted")
     assert r3["action"] == "end"
+
+
+# ---- replay curveballs (judge's merchant-simulator improvises) --------------------------------------
+def _official_state():
+    from vera.dataset import load_dataset
+    import os
+    root = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "dataset", "expanded")
+    if not os.path.exists(root):
+        pytest.skip("official dataset not expanded")
+    ds = load_dataset(root)
+    t = ds.triggers["trg_023_competitor_opened_dentist"]; m = ds.merchants[t["merchant_id"]]; cat = ds.category_for(m)
+    return new_state("cb", cat, m, t, None, compose(cat, m, t, None)["body"])
+
+
+@pytest.mark.parametrize("msg,must", [
+    ("Who are you? Are you from Google?", "not google"),
+    ("Is this a scam?", "never invent"),
+    ("What is CTR?", "ctr ="),
+    ("Can you reduce my magicpin commission?", "magicpin team"),
+    ("I already posted on Instagram yesterday", "google is a separate"),
+    ("Which competitor?", "smile studio"),
+    ("My nephew handles my Google page", "forward"),
+    ("Do it tomorrow morning", "schedule it for tomorrow morning"),
+    ("Kitne customers aayenge isse?", "waada nahi"),
+    ("Call me", "call you"),
+])
+def test_curveballs_get_on_topic_answers(msg, must):
+    r = respond(_official_state(), msg)
+    assert r["action"] == "send" and must in r["body"].lower(), r.get("body")
+
+
+def test_curveball_never_invents_a_forecast():
+    r = respond(_official_state(), "How many customers will I get from this?")
+    assert "can't promise" in r["body"].lower()

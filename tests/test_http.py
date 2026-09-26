@@ -84,3 +84,27 @@ def test_judge_simulator_style_auto_reply_on_fresh_conversations(client):
 def test_teardown(client):
     assert client.post("/v1/teardown").json()["ok"]
     assert client.get("/v1/healthz").json()["contexts_loaded"]["merchant"] == 0
+
+
+def test_post_submission_context_injection_is_used_without_leaks(client):
+    """Brief §8 twist: new digest version, shifted metrics, new trigger, customer attached to a merchant pair."""
+    import copy
+    cat = copy.deepcopy(DS.categories["dentists"])
+    cat["digest"].append({"id": "d_new_sdf", "kind": "research", "title": "Silver diamine fluoride arrests 81% of early caries",
+                          "source": "IJDR May 2026, p.33", "trial_n": 640})
+    assert client.post("/v1/context", json={"scope": "category", "context_id": "dentists", "version": 2, "payload": cat}).json()["accepted"]
+    m = copy.deepcopy(DS.merchants["m_006_smilecare"]); m["performance"].update({"calls": 7, "delta_7d": {"calls_pct": -0.61}})
+    client.post("/v1/context", json={"scope": "merchant", "context_id": m["merchant_id"], "version": 2, "payload": m})
+    trig = [("trg_inj_1", {"kind": "research_digest", "merchant_id": "m_001_drmeera", "payload": {"top_item_id": "d_new_sdf"}}),
+            ("trg_inj_2", {"kind": "perf_dip", "merchant_id": "m_006_smilecare", "payload": {"metric": "calls", "delta_pct": -0.61, "window": "7d"}}),
+            ("trg_inj_3", {"kind": "competitor_opened", "merchant_id": "m_002_studio11", "customer_id": "c_002_rohit",
+                           "payload": {"competitor_name": "Glow Rivals", "distance_km": 0.8}})]
+    for tid, t in trig:
+        client.post("/v1/context", json={"scope": "trigger", "context_id": tid, "version": 1,
+                                          "payload": {"id": tid, "scope": "merchant", "urgency": 3, **t}})
+    acts = {a["trigger_id"]: a for a in client.post("/v1/tick", json={"now": "2026-09-27T10:00:00Z",
+                                                                        "available_triggers": [t for t, _ in trig]}).json()["actions"]}
+    assert "Silver diamine fluoride" in acts["trg_inj_1"]["body"] and "640" in acts["trg_inj_1"]["body"]
+    assert "61%" in acts["trg_inj_2"]["body"] and "41%" not in acts["trg_inj_2"]["body"]
+    cust = acts["trg_inj_3"]
+    assert cust["send_as"] == "merchant_on_behalf" and "Glow Rivals" not in cust["body"], "merchant intel must not reach customers"

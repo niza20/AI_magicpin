@@ -25,6 +25,25 @@ from .orchestrator import Orchestrator
 from .types import Draft, LanguagePlan, StrategyPlan, TraceStep
 from .util import humanize
 
+CURVEBALLS = {
+    "identity": ("_cb_identity", "binary_yes_stop", "Merchant asked who Vera is → brief honest intro, then back to the one action."),
+    "trust": ("_cb_trust", "binary_yes_stop", "Trust/scam question → show where the facts come from; never invented numbers."),
+    "callback": ("_cb_callback", "none", "Merchant wants a human → hand off to the magicpin team, keep the draft ready."),
+    "billing": ("_cb_billing", "binary_yes_stop", "Billing/commission is out of Vera's authority → say so honestly, offer what she can do."),
+    "outcome": ("_cb_outcome", "binary_yes_stop", "Asked for guaranteed results → refuse to invent a number, cite real listing numbers."),
+    "glossary": ("_cb_glossary", "binary_yes_stop", "Explained the term with this merchant's own value."),
+    "delegate": ("_cb_delegate", "binary_yes_stop", "Someone else manages the page → offer forwardable draft / send to them."),
+    "already_done": ("_cb_already", "binary_yes_stop", "Merchant already did something similar → acknowledge, reuse it on Google."),
+}
+_WHEN = re.compile(r"\b(tomorrow(?: morning| evening| afternoon| night)?|kal(?: subah| shaam| raat)?|tonight|this evening|this weekend|"
+                   r"(?:on )?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)|at \d{1,2}(?::\d{2})?\s?(?:am|pm)?)\b", re.I)
+
+
+def _when(message: str) -> Optional[str]:
+    m = _WHEN.search(message or "")
+    return m.group(0) if m else None
+
+
 POST_FAMILIES = {"perf_dip", "perf_spike", "milestone", "competitor", "trend", "festival", "weather", "local_event",
                  "dormant", "recurring", "profile", "offer", "generic"}
 
@@ -147,12 +166,18 @@ class ReplyEngine:
             state.exit_state = "waiting"
             secs = IntentRouter.wait_seconds(message) * (2 if state.later_count > 1 else 1)
             return {"action": "wait", "wait_seconds": secs, "rationale": f"Merchant asked for time — backing off {secs // 60} min."}
+        if mi in CURVEBALLS:
+            body_fn, cta, why = CURVEBALLS[mi]
+            if mi == "callback":
+                state.actions_requested.append("callback")
+            return self._send(state, w, getattr(self, body_fn)(state, w, message), cta, why,
+                              allow=("self_intro",) if mi == "identity" else ())
         if mi == "explicit_action":
             state.exit_state = None
             state.merchant_sentiment = "positive"
             already = bool(state.actions_requested)
             state.actions_requested.append(w["ta"].family)
-            body = self._act(w, already, price=router.is_price_question(message))
+            body = self._act(w, already, price=router.is_price_question(message), when=_when(message))
             return self._send(state, w, body, "open_ended",
                               "Explicit go-ahead → ACT immediately (no re-qualification): delivered the artifact + next step.")
         if mi == "question":
@@ -185,19 +210,25 @@ class ReplyEngine:
         w["brief"] = Brief(w["ta"], w["pz"], w["prof"], w["lang"], w["cust"], w["tools"])
         return w
 
-    def _send(self, state: ConversationState, w: dict, bodies, cta: str, rationale: str) -> dict:
+    def _send(self, state: ConversationState, w: dict, bodies, cta: str, rationale: str, allow: tuple = ()) -> dict:
         options = bodies if isinstance(bodies, list) else [bodies]
         prev = state.bot_bodies()
+        # echoing the other side's own words/times ("tomorrow 10am", "Instagram") is not fabrication
+        theirs = " ".join(state.their_msgs()[-1:])
+        w["ledger"].allow_words(re.findall(r"[A-Za-z]+", theirs))
+        from .ledger import extract_numbers
+        their_nums = set(extract_numbers(theirs))
         chosen = None
         for body in options:
             body = re.sub(r"[ \t]+", " ", body).strip()
             if body in prev:
                 continue
-            d = Draft(segments=[("reply", body)], cta=cta, plan=StrategyPlan("reply", "", "", [], [], cta, "", []))
+            d = Draft(segments=[("reply", body)], cta=cta, plan=StrategyPlan("reply", "", "", [], [], cta, "", []),
+                      allowed_extra_numbers=their_nums)
             f = FactChecker([]).run(d, w["ledger"], w["ta"], bool(state.customer))
             p = PolicyChecker([]).run(d, w["ledger"], w["prof"], w["ta"], w["cust"],
                                       "merchant_on_behalf" if state.customer else "vera", w["lang"].language, prev, max_len=900)
-            blocking = [i for i in f.errors + p.errors if i.code not in ("buried_cta",)]
+            blocking = [i for i in f.errors + p.errors if i.code not in ("buried_cta",) + tuple(allow)]
             if not blocking:
                 chosen = body
                 break
@@ -293,7 +324,7 @@ class ReplyEngine:
             post = f"{lead}Visit {where}.{rating} Message us on WhatsApp to book."
         return post[0].upper() + post[1:], post[0].upper() + post[1:]
 
-    def _act(self, w: dict, already: bool, price: bool = False) -> list[str]:
+    def _act(self, w: dict, already: bool, price: bool = False, when: Optional[str] = None) -> list[str]:
         b, ta = w["brief"], w["ta"]
         fam = ta.family
         cn = b.cust_noun()
@@ -335,8 +366,84 @@ class ReplyEngine:
         post_en, post_hi = self._post_text(w)
         extra_en = " Pricing for the post itself isn't in my records here, so I'll have the magicpin team confirm — no guesses." if price else ""
         extra_hi = " Post ki pricing mere records mein nahi hai, magicpin team confirm karegi — main guess nahi karungi." if price else ""
-        return [b.t(f"Done ✅ Here's the draft post for {name} ↓\n{post_en}\nReply GO and it goes live today, or send any edits.{extra_en}",
-                    f"Ho gaya ✅ {name} ke liye draft post ↓\n{post_hi}\nGO reply karein toh aaj hi live kar doon, ya edits bhej dijiye.{extra_hi}")]
+        live_en = f"I'll schedule it for {when} — reply GO to confirm, or send any edits." if when else "Reply GO and it goes live today, or send any edits."
+        live_hi = f"Main ise {when} ke liye schedule kar dungi — confirm karne ke liye GO reply karein, ya edits bhej dijiye." if when else "GO reply karein toh aaj hi live kar doon, ya edits bhej dijiye."
+        return [b.t(f"Done ✅ Here's the draft post for {name} ↓\n{post_en}\n{live_en}{extra_en}",
+                    f"Ho gaya ✅ {name} ke liye draft post ↓\n{post_hi}\n{live_hi}{extra_hi}")]
+
+    # ---------------------------------------------------------- curveballs
+    def _cb_identity(self, state, w, message):
+        b = w["brief"]
+        name = b.P("name") or "your business"
+        a_en, a_hi = self._action_phrase(w)
+        return [b.t(f"I'm Vera, magicpin's assistant for {name} — not Google, but I help you run your Google listing: posts, offers and review replies. "
+                    f"Right now I'd suggest this: want me to {a_en}? Reply YES.",
+                    f"Main Vera hoon, {name} ke liye magicpin ki assistant — Google nahi, par aapki Google listing sambhalne mein madad karti hoon: posts, offers, review replies. "
+                    f"Abhi ke liye: main {a_hi}? Reply YES.")]
+
+    def _cb_trust(self, state, w, message):
+        b = w["brief"]
+        a_en, a_hi = self._action_phrase(w)
+        facts = self._facts_pool(w)[:2]
+        f_en = "; ".join(f[1] for f in facts) or self._hook_line(w)
+        f_hi = "; ".join(f[2] for f in facts) or self._hook_line(w)
+        return [b.t(f"Fair question, {b.sal()}. Everything I mention comes from your own listing data and magicpin's category benchmarks — e.g. {f_en}. "
+                    f"I never invent numbers, and nothing goes live without your OK. Want me to {a_en}? Reply YES.",
+                    f"Sahi sawaal, {b.sal()}. Main jo bhi batati hoon woh aapki listing ke data aur magicpin ke category benchmarks se hai — jaise {f_hi}. "
+                    f"Main koi number invent nahi karti, aur aapke OK ke bina kuch live nahi hota. Main {a_hi}? Reply YES.")]
+
+    def _cb_callback(self, state, w, message):
+        b = w["brief"]
+        return [b.t(f"Sure, {b.sal()} — I'll ask the magicpin team to call you on this number. Meanwhile I'll keep the draft ready so the call is quick.",
+                    f"Zaroor, {b.sal()} — main magicpin team ko isi number pe call karne ko bol deti hoon. Tab tak draft ready rakhti hoon taaki call jaldi ho jaaye.")]
+
+    def _cb_billing(self, state, w, message):
+        b = w["brief"]
+        a_en, a_hi = self._action_phrase(w)
+        return [b.t(f"I can't change commissions or billing myself, {b.sal()} — the magicpin team handles that, and I'll pass your request on. "
+                    f"What I can do today: {a_en}. Want that? Reply YES.",
+                    f"Commission ya billing main khud nahi badal sakti, {b.sal()} — woh magicpin team dekhti hai, main aapki request aage bhej dungi. "
+                    f"Aaj main yeh kar sakti hoon: {a_hi.rstrip('?')}. Chahiye? Reply YES.")]
+
+    def _cb_outcome(self, state, w, message):
+        b = w["brief"]
+        a_en, a_hi = self._action_phrase(w)
+        facts = [f for f in self._facts_pool(w) if f[0] in ("views", "calls", "ctr")][:2]
+        f_en = "; ".join(f[1] for f in facts)
+        f_hi = "; ".join(f[2] for f in facts)
+        return [b.t(f"Honestly, I can't promise a number — anyone who does is guessing. What I can tell you: {f_en or self._hook_line(w)}. "
+                    f"A fresh post is the cheapest way to move those. Want me to {a_en}? Reply YES.",
+                    f"Sach kahun toh exact number ka waada nahi kar sakti — jo karta hai woh guess karta hai. Jo pakka hai: {f_hi or self._hook_line(w)}. "
+                    f"Fresh post in numbers ko badhane ka sabse sasta tareeka hai. Main {a_hi}? Reply YES.")]
+
+    def _cb_glossary(self, state, w, message):
+        b = w["brief"]
+        low = message.lower()
+        a_en, a_hi = self._action_phrase(w)
+        if "ctr" in low or "click" in low or "benchmark" in low:
+            mine = f" Yours is {b.P('ctr')} vs {b.P('peer_ctr')} for {b.prof.peer_label}." if b.P("ctr") and b.P("peer_ctr") else ""
+            mine_hi = f" Aapka {b.P('ctr')} hai, {b.prof.peer_label} ka {b.P('peer_ctr')}." if b.P("ctr") and b.P("peer_ctr") else ""
+            return [b.t(f"CTR = out of everyone who sees your Google listing, the % who act on it (call, ask directions, visit your site).{mine} "
+                        f"Want me to {a_en}? Reply YES.",
+                        f"CTR matlab: jitne log aapki Google listing dekhte hain, unmein se kitne % action lete hain (call, directions, website).{mine_hi} "
+                        f"Main {a_hi}? Reply YES.")]
+        if "gbp" in low or "google" in low or "verification" in low:
+            return [b.t(f"GBP is your Google Business Profile — the listing people see on Google Search and Maps. Verified, complete profiles get more calls. Want me to {a_en}? Reply YES.",
+                        f"GBP matlab aapka Google Business Profile — Google Search aur Maps pe dikhne wali listing. Verified aur complete profile ko zyada calls milte hain. Main {a_hi}? Reply YES.")]
+        return [b.t(f"Good question — in short: {self._hook_line(w)} Want me to {a_en}? Reply YES.",
+                    f"Short mein: {self._hook_line(w)} Main {a_hi}? Reply YES.")]
+
+    def _cb_delegate(self, state, w, message):
+        b = w["brief"]
+        return [b.t(f"No problem, {b.sal()}. I'll keep the draft here so you can forward it, or share their WhatsApp number and I'll send it to them directly. Shall I draft it now? Reply YES.",
+                    f"Koi baat nahi, {b.sal()}. Main draft yahin rakh deti hoon aap forward kar dijiye, ya unka WhatsApp number bhej dijiye, main seedha unhe bhej dungi. Abhi draft kar doon? Reply YES.")]
+
+    def _cb_already(self, state, w, message):
+        b = w["brief"]
+        views = f" ({b.P('views')} views on your listing in the last {b.P('window')})" if b.P("views") and b.P("window") else ""
+        views_hi = f" (pichhle {(b.P('window') or '').replace('days', 'din')} mein listing pe {b.P('views')} views)" if b.P("views") and b.P("window") else ""
+        return [b.t(f"Nice — that helps. Google is a separate place people look{views}, so want me to reuse the same idea as a Google post? Reply YES.",
+                    f"Badhiya — isse madad milti hai. Google alag jagah hai jahan log dhoondhte hain{views_hi}, toh wahi idea Google post ke roop mein bhi daal doon? Reply YES.")]
 
     def _price(self, w: dict) -> list[str]:
         b = w["brief"]
@@ -376,6 +483,30 @@ class ReplyEngine:
         how = bool(re.search(r"\bhow\b|kaise|process|work", message.lower()))
         what = bool(re.search(r"\b(what|about|kya hai|kya baat|matlab|explain|samjha)", message.lower()))
         out = []
+        low = message.lower()
+        entity = []
+        a = w["ta"].anchor
+        if re.search(r"\b(which|who|kaun|kaunsa|name)\b", low) and w["ta"].family == "competitor" and "name" in a:
+            bits = [b.A("name"), (b.A("distance") and b.t(f"{b.A('distance')} from you", f"aapse {b.A('distance')} door")),
+                    (b.A("date") and b.t(f"opened {b.A('date')}", f"{b.A('date')} ko khula")),
+                    (b.A("offer") and b.t(f"launch offer {b.A('offer')}", f"launch offer {b.A('offer')}"))]
+            out.append(b.t(f"It's {', '.join(x for x in bits if x)}. Want me to {a_en}? Reply YES.",
+                           f"Woh {', '.join(x for x in bits if x)} hai. Main {a_hi}? Reply YES."))
+        elif re.search(r"\b(which|who|kaun|kaunsa|name)\b", low):
+            entity = [k for k in ("name", "headline", "title", "query", "theme", "offer", "molecule") if k in a]
+        elif re.search(r"\b(when|kab|date|deadline)\b", low):
+            entity = [k for k in ("date", "effective", "event_date", "days_until", "due", "when") if k in a]
+        elif re.search(r"\b(where|kahan|how far|distance|location)\b", low):
+            entity = [k for k in ("distance", "location", "city") if k in a] + (["locality"] if b.P("locality") else [])
+        if entity:
+            parts = []
+            for k in entity[:3]:
+                txt = b.A(k) if k in a else b.P(k)
+                if txt:
+                    parts.append(txt)
+            if parts:
+                out.append(b.t(f"{' · '.join(parts)} — that's what I have from the context. Want me to {a_en}? Reply YES.",
+                               f"{' · '.join(parts)} — yeh jaankari mere paas hai. Main {a_hi}? Reply YES."))
         if what and "hook" not in state.facts_mentioned:
             state.facts_mentioned.add("hook")
             out.append(b.t(f"In short: {self._hook_line(w)} Want me to {a_en}? Reply YES.",

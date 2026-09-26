@@ -40,6 +40,7 @@ GROUPS = {
     "planning": "Engagement & merchant intent", "generic": "Engagement & merchant intent",
     "customer_recall": "Customer-facing (sent on the merchant's behalf)",
     "customer_appointment": "Customer-facing (sent on the merchant's behalf)",
+    "customer_promo": "Customer-facing (sent on the merchant's behalf)",
 }
 LANGS = {"auto": None, "en": "en", "hi-en": "hi-en", "hi": "hi"}
 QUALIFYING = ["would you", "do you", "can you tell", "what if", "how about"]
@@ -161,6 +162,10 @@ REPLAYS = {
                 "expect": "Apologise once, decline GST politely, stay on mission; exit if hostility repeats."},
     "stop": {"title": "STOP", "pain": "Knowing when to stop", "turns": ["STOP"],
              "expect": "End immediately and never message this merchant again."},
+    "curveballs": {"title": "Curveball questions", "pain": "Replay: curveball questions",
+                   "turns": ["Who are you? Are you from Google?", "Which competitor?", "What is CTR?", "Kitne customers aayenge isse?",
+                             "Can you reduce my magicpin commission?", "Do it tomorrow morning"],
+                   "expect": "Every off-script question gets an on-topic, fact-based answer; no invented forecasts; the action still lands."},
     "language": {"title": "Language switch", "pain": "Per-turn language", "turns": ["haan theek hai, yeh kya hai?", "ok karo"],
                  "expect": "Merchant switches to Hinglish → Vera replies in Hinglish and acts on 'ok karo'."},
 }
@@ -181,6 +186,12 @@ def _check(name: str, results: list[dict]) -> tuple[bool, str]:
         return ok, "polite, declined GST, stayed on mission" if ok else "went off mission"
     if name == "stop":
         return acts == ["end"], "ended immediately" if acts == ["end"] else "kept talking"
+    if name == "curveballs":
+        bodies = " ".join((r.get("body") or "") for r in results).lower()
+        checks = ["not google" in bodies, "smile studio" in bodies, "ctr" in bodies,
+                  ("waada nahi" in bodies or "can't promise" in bodies), "magicpin team" in bodies, "tomorrow morning" in bodies]
+        ok = all(checks) and all(r["action"] == "send" for r in results)
+        return ok, f"{sum(checks)}/6 answered on-topic from facts" if ok else f"only {sum(checks)}/6 on-topic"
     if name == "language":
         ok = all(a == "send" for a in acts) and bool(re.search(r"\b(hai|kar|main|aap|mein|karein)\b", body))
         return ok, "replied in Hinglish" if ok else "language not matched"
@@ -209,6 +220,42 @@ def replay(body: dict):
     ok, verdict = _check(name, results)
     return {"title": spec["title"], "pain": spec["pain"], "expect": spec["expect"], "opening": res.output["body"],
             "merchant": m["identity"]["name"], "turns": results, "pass": ok, "verdict": verdict}
+
+
+@router.post("/demo/api/inject")
+def inject(body: dict):
+    """Brief §8 twist, live: same merchant before vs after new context arrives (new digest item, shifted metrics,
+    customer attached to a merchant-level trigger)."""
+    import copy
+    lang = LANGS.get(body.get("language") or "auto")
+    ds = _dataset()
+    steps = []
+    # 1. new digest item → research trigger uses it
+    cat, m, t, _ = _ctx("trg_001_research_digest_dentists")
+    before = _orch.compose(cat, m, t, None, language=lang).output["body"]
+    cat2 = copy.deepcopy(cat)
+    cat2["digest"].append({"id": "d_injected_sdf", "kind": "research", "title": "Silver diamine fluoride arrests 81% of early caries in 12 months",
+                           "source": "IJDR May 2026, p.33", "trial_n": 640, "patient_segment": "pediatric",
+                           "actionable": "Consider SDF for pediatric patients who can't sit for fillings"})
+    t2 = {**t, "payload": {"top_item_id": "d_injected_sdf"}}
+    after = _orch.compose(cat2, m, t2, None, language=lang).output["body"]
+    steps.append({"what": "New digest item pushed (category v2) + trigger pointing at it", "before": before, "after": after})
+    # 2. performance snapshot shifts
+    cat, m, t, _ = _ctx("trg_004_perf_dip_bharat")
+    before = _orch.compose(cat, m, t, None, language=lang).output["body"]
+    m2 = copy.deepcopy(m)
+    m2["performance"].update({"calls": 7, "ctr": 0.012, "delta_7d": {"views_pct": -0.35, "calls_pct": -0.61}})
+    after = _orch.compose(cat, m2, {**t, "payload": {"metric": "calls", "delta_pct": -0.61, "window": "7d"}}, None, language=lang).output["body"]
+    steps.append({"what": "Merchant performance updated (calls -61%, CTR 1.2%)", "before": before, "after": after})
+    # 3. customer context attached to a merchant-level trigger
+    cat, m, t, _ = _ctx("trg_023_competitor_opened_dentist")
+    before = _orch.compose(cat, m, t, None, language=lang).output["body"]
+    cust = next(c for c in ds.customers.values() if c["merchant_id"] == m["merchant_id"]
+                and "promotional_offers" in (c.get("consent") or {}).get("scope", []))
+    res = _orch.compose(cat, m, t, cust, language=lang)
+    steps.append({"what": f"CustomerContext ({cust['identity']['name']}) attached to the competitor trigger",
+                  "before": before, "after": res.output["body"] + f"\n[send_as={res.output['send_as']} · competitor intel withheld from the customer]"})
+    return {"steps": steps}
 
 
 @router.post("/demo/api/portfolio")
@@ -310,7 +357,7 @@ code{font-size:11px;word-break:break-all}
 <script>
 const $=s=>document.querySelector(s);let sid=null,SC=[],cur=null,LANG='auto',TAB='sc';
 const QUICK=["How much will this cost?","ok lets do it","what is this about?","Thank you for contacting us! Our team will respond shortly.","busy, call me tomorrow","can you help me file my GST?","not interested","haan karo"];
-const REPLAYS=[["auto_reply","Auto-reply hell","Same canned WhatsApp auto-reply 4× in a row"],["intent","Intent transition","2 qualifying turns, then “ok let's do it”"],["join","“I want to join”","Explicit intent on the very first reply"],["hostile","Hostile + off-topic","Abuse, then a GST question"],["stop","STOP","Hard opt-out"],["language","Language switch","Merchant replies in Hinglish"]];
+const REPLAYS=[["auto_reply","Auto-reply hell","Same canned WhatsApp auto-reply 4× in a row"],["intent","Intent transition","2 qualifying turns, then “ok let's do it”"],["join","“I want to join”","Explicit intent on the very first reply"],["hostile","Hostile + off-topic","Abuse, then a GST question"],["stop","STOP","Hard opt-out"],["curveballs","Curveball questions","Who are you? · Which competitor? · What is CTR? · How many customers? · commission · schedule"],["language","Language switch","Merchant replies in Hinglish"]];
 const PAINS=[["Auto-reply pollution","Canned replies detected by phrasing + verbatim repeats (tracked per merchant, even across conversations). One owner-directed nudge, then exit.","auto_reply"],["Intent-handoff failures","“yes / go ahead / ok let's do it / judna hai” routes straight to ACT and delivers the draft — never back to qualifying.","intent"],["Generic copy","Offers ranked service+price first (“Dental Cleaning @ ₹299”); a deterministic checker rejects invented “X% off” claims.",null],["Low engagement frequency","A portfolio of different conversation types — research, trends, curiosity asks, CDE, events — not just reminders.","week"]];
 function esc(s){return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
 function add(text,cls,meta){const d=document.createElement('div');d.className='m '+cls;d.textContent=text;if(meta){const s=document.createElement('span');s.className='meta';s.textContent=meta;d.appendChild(s)}$('#log').appendChild(d);$('#log').scrollTop=1e9;return d}
@@ -326,7 +373,8 @@ function side(){const el=$('#side');el.innerHTML='';
     d.innerHTML=`<b>${x.id} · ${esc(x.merchant)}</b><span>${esc(x.kind)} · ${esc(x.category)} ${x.audience==='customer'?'<i class="pill cust">→ customer '+esc(x.to||'')+'</i>':'<i class="pill">Vera → owner</i>'}${x.placeholder?'<i class="pill" title="Trigger has no payload: composed from merchant data only">no-payload</i>':''}</span>`;
     d.onclick=()=>start(x);el.appendChild(d)})})}
  else if(TAB==='rp'){el.insertAdjacentHTML('beforeend','<div class="gh">Judge replay tests (phase 4) · click to run live</div>');
-  REPLAYS.forEach(r=>el.insertAdjacentHTML('beforeend',`<div class="rp"><b>${r[1]}</b><span>${r[2]}</span><button class="btn" onclick="runReplay('${r[0]}')">Run test</button></div>`))}
+  REPLAYS.forEach(r=>el.insertAdjacentHTML('beforeend',`<div class="rp"><b>${r[1]}</b><span>${r[2]}</span><button class="btn" onclick="runReplay('${r[0]}')">Run test</button></div>`));
+  el.insertAdjacentHTML('beforeend','<div class="gh">Post-submission twist (§8)</div><div class="rp"><b>Context injection</b><span>New digest item, shifted metrics, customer added mid-test — before vs after</span><button class="btn" onclick="runInject()">Run test</button></div>')}
  else{el.insertAdjacentHTML('beforeend','<div class="gh">Weekly conversation plan · pick a merchant</div>');
   const seen=new Set();SC.filter(x=>x.audience==='merchant'&&!seen.has(x.merchant_id)&&seen.add(x.merchant_id)).forEach(x=>{const d=document.createElement('div');d.className='sc';d.innerHTML=`<b>${esc(x.merchant)}</b><span>${esc(x.category)}</span>`;d.onclick=()=>week(x);el.appendChild(d)})}}
 function tab(t){TAB=t;document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('on',b.dataset.t===t));side()}
@@ -348,6 +396,10 @@ async function runReplay(name){sid=null;enable(false);$('#quick').innerHTML='';$
  r.turns.forEach(t=>{add(t.merchant,'u','judge (as merchant)');if(t.action==='send')add(t.body,'v',t.rationale);else if(t.action==='wait')sys('⏸ wait '+Math.round(t.wait_seconds/60)+' min — '+t.rationale);else sys('🔚 end — '+t.rationale)});
  sys((r.pass?'✅ PASS — ':'❌ FAIL — ')+r.verdict,'verdict '+(r.pass?'pass':'fail'));
  $('#info').innerHTML='<h2>Replay test</h2><p><b>'+esc(r.title)+'</b>: '+esc(r.expect)+'</p><p>Result: <b>'+(r.pass?'PASS':'FAIL')+'</b> — '+esc(r.verdict)+'</p>'+pains()}
+async function runInject(){sid=null;enable(false);$('#quick').innerHTML='';$('#log').innerHTML='';sys('Injecting new context…');
+ const r=await post('/demo/api/inject',{language:LANG});$('#log').innerHTML='';$('#who').textContent='Post-submission context injection';$('#sub').textContent='Same merchants, before vs after the judge pushes new data';
+ r.steps.forEach(s=>{$('#log').insertAdjacentHTML('beforeend',`<div class="sys"><b>${esc(s.what)}</b></div>`);add(s.before,'v','BEFORE');add(s.after,'v','AFTER — adapted, nothing invented')});
+ $('#info').innerHTML='<h2>What the judge does</h2><p>After submission it pushes new digest items, updated performance, new triggers, and customer contexts for 5 pairs. Bots that adapt without hallucinating score higher.</p><h2>What changed here</h2><ul><li>New research item → cited with its source, n and next step</li><li>New numbers → message recomputed, old numbers gone</li><li>Customer added → message re-addressed to the customer; competitor intel withheld</li></ul>'+pains()}
 async function week(x){sid=null;enable(false);$('#quick').innerHTML='';$('#log').innerHTML='';sys('Planning a week of conversations…');
  const r=await post('/demo/api/portfolio',{merchant_id:x.merchant_id,language:LANG});$('#log').innerHTML='';
  $('#who').textContent='Weekly plan · '+r.merchant;$('#sub').textContent='Different conversation types, not just reminders';

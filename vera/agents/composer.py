@@ -826,6 +826,35 @@ def r_customer_recall(b: Brief) -> Parts:
     return Parts(hook, anchor, {}, ctas, send_as="merchant_on_behalf")
 
 
+def r_customer_promo(b: Brief) -> Parts:
+    """Customer attached to a merchant-level event. Only customer-relevant events are mentioned;
+    merchant-internal facts (competitors, CTR, reviews, research) never reach the customer."""
+    first = (b.cust.first_name if b.cust else "") or ""
+    ms = b.merchant_short()
+    ev = b.Araw("_event_family")
+    hook = b.t(f"Hi {first}, {ms} here." if first else f"Hi, {ms} here.", f"Hi {first}, {ms} se." if first else f"Namaste, {ms} se.",
+               f"नमस्ते {first}, {ms} से।")
+    anchor = []
+    if ev == "festival" and b.A("name"):
+        anchor.append(b.t(f"{b.A('name')} is coming up" + (f" ({b.A('date')})" if b.A("date") else "") + " — we'd love to help you get ready.",
+                          f"{b.A('name')} aa raha hai" + (f" ({b.A('date')})" if b.A("date") else "") + " — taiyaari mein hum madad karenge.",
+                          f"{b.A('name')} आ रहा है" + (f" ({b.A('date')})" if b.A("date") else "") + " — तैयारी में हम मदद करेंगे।"))
+    elif ev == "local_event" and b.A("headline") and "vs" in (b.A("headline") or ""):
+        anchor.append(b.t(f"{b.A('headline')} tonight — watch it with us or order in.", f"Aaj {b.A('headline')} hai — hamare yahan dekhiye ya ghar mangwaiye.",
+                          f"आज {b.A('headline')} है — हमारे यहाँ देखिए या घर मँगवाइए।"))
+    elif ev == "weather" and b.A("temp"):
+        anchor.append(b.t(f"It's {b.A('temp')} out there — stay cool.", f"Bahar {b.A('temp')} hai — dhyaan rakhiye.", f"बाहर {b.A('temp')} है — ध्यान रखिए।"))
+    elif b.A("last_visit"):
+        anchor.append(b.t(f"It's been a while since your last visit on {b.A('last_visit')} — we'd love to see you again.",
+                          f"{b.A('last_visit')} ke baad aapse mulaqat nahi hui — aapka intezaar hai.",
+                          f"{b.A('last_visit')} के बाद आपसे मुलाक़ात नहीं हुई — आपका इंतज़ार है।"))
+    o = b.pick_customer_offer()
+    if o:
+        anchor.append(b.t(f"For you: {o}.", f"Aapke liye: {o}.", f"आपके लिए: {o}।"))
+    ctas = {"confirm": b.t("Reply YES and we'll book it for you.", "YES reply karein, hum aapke liye book kar denge.", "YES भेजें, हम आपके लिए बुक कर देंगे।")}
+    return Parts(hook, anchor, {}, ctas, send_as="merchant_on_behalf")
+
+
 def r_customer_appointment(b: Brief) -> Parts:
     first = (b.cust.first_name if b.cust else "") or ""
     ms = b.merchant_short()
@@ -846,15 +875,21 @@ def r_customer_appointment(b: Brief) -> Parts:
 
 
 def r_generic(b: Brief) -> Parts:
+    """Unseen trigger kind: lead with the payload's text fact verbatim, then its numbers — no interpretation."""
     name = b.P("name") or ""
     items = [(k, v) for k, v in b.ta.anchor.items() if k.startswith("g_")]
-    facts = []
+    text_fact, nums = None, []
     for k, v in items[:3]:
         b.A(k)
-        facts.append(f"{v.get('label', humanize(k[2:]))}: {v['text']}")
+        is_text = isinstance(v.get("value"), str) and not re.fullmatch(r"[\d.,₹%-]+", str(v.get("value"))) and "date" not in v
+        if is_text and text_fact is None and len(str(v["value"])) > 12:
+            text_fact = v["text"]
+        else:
+            nums.append(f"{v.get('label', humanize(k[2:]))}: {v['text']}")
     kind = humanize(b.ta.trigger_type)
-    hook = b.t(f"{b.sal()}, a quick {kind} update for {name}" + (f" — {'; '.join(facts)}." if facts else "."),
-               f"{b.sal()}, {name} ke liye ek quick {kind} update" + (f" — {'; '.join(facts)}." if facts else "."))
+    detail = (f"“{text_fact}”" if text_fact else "") + ((" — " if text_fact else "") + "; ".join(nums) if nums else "")
+    hook = b.t(f"{b.sal()}, heads-up for {name} ({kind})" + (f": {detail}." if detail else "."),
+               f"{b.sal()}, {name} ke liye heads-up ({kind})" + (f": {detail}." if detail else "."))
     levers = {}
     ctas = _post_cta(b, "look into this and share the next steps here", "ise check karke next steps yahin bhej doon")
     ctas["curiosity"] = b.t("Want the details?", "Details bhej doon?")
@@ -937,7 +972,7 @@ REALIZERS = {
     "weather": r_weather, "local_event": r_local_event, "reputation": r_reputation, "dormant": r_dormant,
     "recurring": r_recurring, "account": r_account, "profile": r_profile, "offer": r_offer,
     "customer_recall": r_customer_recall, "customer_appointment": r_customer_appointment, "generic": r_generic,
-    "planning": r_planning, "seasonal": r_seasonal, "supply": r_supply,
+    "planning": r_planning, "seasonal": r_seasonal, "supply": r_supply, "customer_promo": r_customer_promo,
 }
 CTA_FALLBACK = ["effort", "confirm", "slot", "curiosity", "ask"]
 

@@ -16,7 +16,7 @@ FAMILY_PREFIX = {
     "milestone": "milestone", "competitor": "competitor", "trend": "trend", "festival": "festival",
     "weather": "weather", "local_event": "local", "reputation": "reviews", "dormant": "dormant",
     "recurring": "recurring", "account": "account", "profile": "profile", "offer": "offer",
-    "customer_recall": "recall", "customer_appointment": "appointment", "generic": "event",
+    "customer_recall": "recall", "customer_appointment": "appointment", "customer_promo": "promo", "generic": "event",
 }
 
 

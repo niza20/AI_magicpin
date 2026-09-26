@@ -217,9 +217,13 @@ class Orchestrator:
         skey = SuppressionAgent(trace).run(tools, ta) + ":consent"
         sal = pz.get("salutation", {}).get("text", "")
         first = cust.first_name or "this customer"
-        body = {"en": f"{sal}, {first}'s follow-up is due, but they haven't opted in to messages for this. "
+        scopes = tools.get_customer_fact("consent.scope") or []
+        scope_txt = ", ".join(str(s).replace("_", " ") for s in scopes) if isinstance(scopes, list) and scopes else ""
+        covers_en = f"their consent only covers {scope_txt}" if scope_txt else "they haven't opted in to messages from you"
+        covers_hi = f"unka consent sirf {scope_txt} ke liye hai" if scope_txt else "unhone aapke messages ke liye opt-in nahi kiya hai"
+        body = {"en": f"{sal}, I could message {first} about this, but {covers_en}. "
                       f"Want me to send them a one-time opt-in request from your number instead? Reply YES.",
-                "hi-en": f"{sal}, {first} ka follow-up due hai, lekin unhone is tarah ke messages ke liye opt-in nahi kiya hai. "
+                "hi-en": f"{sal}, main {first} ko is baare mein message kar sakti thi, lekin {covers_hi}. "
                          f"Main aapke number se ek one-time opt-in request bhej doon? Reply YES."}
         out = {"body": body.get(lang if lang != "hi" else "hi-en", body["en"]), "cta": "binary_yes_stop", "send_as": "vera",
                "suppression_key": skey,

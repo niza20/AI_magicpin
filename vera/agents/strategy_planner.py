@@ -51,6 +51,7 @@ VARIANTS: dict[str, list[tuple[str, list[str], str]]] = {
               ("offer_curiosity", ["specificity", "curiosity"], "curiosity")],
     "customer_recall": [("recall_slots", ["specificity", "single_binary_commitment"], "slot"),
                         ("recall_binary", ["specificity", "single_binary_commitment"], "confirm")],
+    "customer_promo": [("promo_confirm", ["specificity", "single_binary_commitment"], "confirm")],
     "customer_appointment": [("appointment_confirm", ["specificity", "single_binary_commitment"], "confirm")],
     "generic": [("generic_effort", ["specificity", "effort_externalization"], "effort"),
                 ("generic_curiosity", ["specificity", "curiosity"], "curiosity")],

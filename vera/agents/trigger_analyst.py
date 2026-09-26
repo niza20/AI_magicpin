@@ -59,6 +59,7 @@ FAMILY_GOALS = {
     "recurring": ("DISCOVER", "curiosity/ask-the-merchant touch that yields content", "draft_google_post"),
     "account": ("ACT", "keep the account active — renewal/plan action", "subscription_renewal"),
     "planning": ("ACT", "merchant already asked — deliver a concrete first draft now", "draft_program"),
+    "customer_promo": ("ACT", "invite the customer back with the merchant's real offer", "book_slot"),
     "seasonal": ("RECOMMEND", "adjust stock/offers to the season's demand shift", "draft_google_post"),
     "supply": ("ACT", "protect customers from an affected batch — shelf check now", "shelf_check"),
     "profile": ("RECOMMEND", "fix a concrete profile gap", "draft_google_post"),
@@ -97,8 +98,21 @@ class TriggerAnalyst(Agent):
         if self.placeholder:
             anchor["_placeholder"] = {"value": True}
         getattr(self, f"_a_{fam}", self._a_generic)(anchor)
-        if not any(k for k in anchor if not k.startswith("_")) and not self.placeholder:
+        real = [k for k in anchor if not k.startswith("_")]
+        payload_has_data = isinstance(self.payload, dict) and any(
+            v not in (None, "", [], {}) for k, v in self.payload.items() if k not in ("merchant_id", "customer_id", "category"))
+        if not real and not self.placeholder:
+            # the kind name matched a family but the payload doesn't fit it (e.g. "price_benchmark_shift" ≠ an offer):
+            # don't force a wrong story — surface the payload as-is
+            if payload_has_data and fam not in ("generic",) and not fam.startswith("customer_"):
+                fam = "generic"
             self._a_generic(anchor)
+        if tools.has_customer and not fam.startswith("customer_"):
+            # a customer context attached to a merchant-level event (brief §8 twist): write to the customer,
+            # never exposing merchant-internal facts (competitors, CTR, ...)
+            anchor["_event_family"] = {"value": fam}
+            self._a_customer_recall(anchor)
+            fam = "customer_promo"
         urgency = int(as_float(tools.get_trigger_fact("urgency")) or 2)
         mode, goal, action = FAMILY_GOALS.get(fam, FAMILY_GOALS["generic"])
         exp = tools.get_trigger_fact("expires_at")
