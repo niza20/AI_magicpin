@@ -215,6 +215,12 @@ if FastAPI is not None:
         received_at: Optional[str] = None
         turn_number: Optional[int] = None
 
+    @app.get("/")
+    def root():
+        return {"service": "Vera agentic bot", "status": "ok",
+                "endpoints": ["GET /v1/healthz", "GET /v1/metadata", "POST /v1/context", "POST /v1/tick",
+                              "POST /v1/reply", "POST /v1/teardown"]}
+
     @app.get("/v1/healthz")
     def healthz():
         counts = {s: 0 for s in VALID_SCOPES}
