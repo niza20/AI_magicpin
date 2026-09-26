@@ -1,9 +1,9 @@
-# Put the OFFICIAL magicpin dataset here
+# Official dataset
 
-Either layout works:
-- `categories/*.json`, `merchants/*.json`, `customers/*.json`, `triggers/*.json`, or
-- `categories/*.json` + `merchants_seed.json`, `customers_seed.json`, `triggers_seed.json` (the layout `judge_simulator.py` reads)
+- `seed/`: the files as uploaded (5 category packs, `merchants_seed.json`, `customers_seed.json`, `triggers_seed.json`,
+  and magicpin's `generate_dataset.py`).
+- `expanded/`: output of `python seed/generate_dataset.py --out expanded` (run from this folder). The generator is
+  deterministic with a fixed seed. It contains 50 merchants, 200 customers, 100 triggers, and `test_pairs.json`
+  with the 30 canonical pairs T01-T30.
 
-plus the canonical **30 test pairs** file (auto-discovered: `test_pairs*.json`, `*test*pair*.json`, ... or pass
-`--pairs`). Then run `python generate_submission.py` to write `submission.jsonl`. The generator refuses to invent
-test IDs.
+`python generate_submission.py --dataset dataset/expanded` writes `submission.jsonl`.

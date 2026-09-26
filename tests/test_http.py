@@ -52,9 +52,10 @@ def test_tick_actions_suppression_and_restraint(client):
     assert again["actions"] == [], "suppression keys must prevent re-sends"
 
 
-def test_expired_trigger_skipped(client):
+def test_judge_list_is_authoritative_but_fresh_triggers_win(client):
+    # judge_simulator stamps wall-clock `now`; dataset expiries are simulated time → still send what the judge lists
     r = client.post("/v1/tick", json={"now": "2027-01-01T00:00:00Z", "available_triggers": ["trg_001_research_dentists"]}).json()
-    assert r["actions"] == []
+    assert len(r["actions"]) == 1
 
 
 def test_reply_flow_and_stop_blocks_future_ticks(client):

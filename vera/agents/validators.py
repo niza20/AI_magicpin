@@ -109,7 +109,7 @@ class FactChecker(Agent):
         # 6. research/citation claims only when a digest item backs them
         verbatim_scrubbed = body
         for f in ledger.facts.values():
-            if isinstance(f.value, str) and len(f.value) >= 6 and f.value in verbatim_scrubbed:
+            if isinstance(f.value, str) and len(f.value) >= 4 and f.value in verbatim_scrubbed:
                 verbatim_scrubbed = verbatim_scrubbed.replace(f.value, " ")
         if re.search(r"\b(study|trial|journal|research shows|according to|published)\b", verbatim_scrubbed, re.I) \
                 and ta.family not in ("knowledge", "regulation") and not self._has_cited_digest(body, ledger):

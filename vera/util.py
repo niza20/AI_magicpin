@@ -153,6 +153,7 @@ def stable_hash(obj: Any) -> str:
 
 def norm_space(s: str) -> str:
     s = re.sub(r"[ \t]+", " ", s)
+    s = re.sub(r" *\n *", "\n", s)
     s = re.sub(r" +([,.?!:;])", r"\1", s)
     s = re.sub(r"\.\.+", ".", s)
     s = re.sub(r"\?\.", "?", s)

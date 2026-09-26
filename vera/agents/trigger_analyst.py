@@ -21,11 +21,14 @@ from .base import Agent
 FAMILY_RULES: list[tuple[str, tuple[str, ...]]] = [
     ("customer_appointment", ("appointment", "booking_reminder", "visit_tomorrow")),
     ("customer_recall", ("recall", "lapsed", "winback", "win_back", "unplanned_slot", "refill", "renewal_customer",
-                         "membership_expir", "birthday")),
+                         "membership_expir", "birthday", "followup", "follow_up", "trial", "wedding", "package")),
+    ("supply", ("supply", "batch", "stock_alert", "shortage", "product_recall", "drug_recall", "withdrawal")),
+    ("planning", ("planning", "intent", "program_draft", "proposal")),
     ("regulation", ("regulation", "compliance", "circular", "policy", "mandate", "license")),
-    ("knowledge", ("research", "digest", "journal", "study", "cde", "clinical_update", "knowledge")),
+    ("knowledge", ("research", "digest", "journal", "study", "cde", "webinar", "conference", "clinical_update", "knowledge")),
     ("perf_dip", ("dip", "drop", "decline", "below_peer", "fall", "down")),
     ("perf_spike", ("spike", "surge", "jump", "growth", "peak")),
+    ("seasonal", ("category_seasonal", "seasonal_demand", "demand_shift", "seasonal")),
     ("milestone", ("milestone", "crossed", "anniversary", "record")),
     ("competitor", ("competitor", "rival", "new_entrant", "opened_nearby")),
     ("trend", ("trend", "search", "query", "demand")),
@@ -36,8 +39,8 @@ FAMILY_RULES: list[tuple[str, tuple[str, ...]]] = [
     ("dormant", ("dormant", "inactive", "no_reply", "silent", "unresponsive")),
     ("recurring", ("scheduled", "recurring", "weekly", "curious", "check_in", "cadence", "ask")),
     ("offer", ("offer", "catalog", "price", "deal")),
-    ("account", ("renewal", "subscription", "expir", "plan", "payment", "trial", "invoice")),
-    ("profile", ("profile", "gbp", "photo", "hours", "stale", "post", "listing", "verification")),
+    ("account", ("renewal", "subscription", "expir", "payment", "invoice", "winback", "win_back", "trial_ending", "plan_expir")),
+    ("profile", ("profile", "gbp", "photo", "hours", "stale", "post", "listing", "verification", "unverified", "verify")),
 ]
 
 FAMILY_GOALS = {
@@ -55,6 +58,9 @@ FAMILY_GOALS = {
     "dormant": ("DISCOVER", "re-open the conversation with a low-effort ask", "draft_google_post"),
     "recurring": ("DISCOVER", "curiosity/ask-the-merchant touch that yields content", "draft_google_post"),
     "account": ("ACT", "keep the account active — renewal/plan action", "subscription_renewal"),
+    "planning": ("ACT", "merchant already asked — deliver a concrete first draft now", "draft_program"),
+    "seasonal": ("RECOMMEND", "adjust stock/offers to the season's demand shift", "draft_google_post"),
+    "supply": ("ACT", "protect customers from an affected batch — shelf check now", "shelf_check"),
     "profile": ("RECOMMEND", "fix a concrete profile gap", "draft_google_post"),
     "offer": ("RECOMMEND", "get the right service+price offer live", "reactivate_offer"),
     "customer_recall": ("ACT", "bring the customer back with a concrete slot/price", "book_slot"),
@@ -63,6 +69,7 @@ FAMILY_GOALS = {
 }
 
 INFORMATIONAL = {"knowledge", "regulation"}
+_HONORIFIC = re.compile(r"^(mr|mrs|ms|miss|dr|shri|smt)\.?\s+", re.I)
 
 
 def classify_family(kind: str, scope: str) -> str:
@@ -86,8 +93,11 @@ class TriggerAnalyst(Agent):
         fam = classify_family(kind, scope)
         self.payload = tools.get_trigger_fact("payload") or {}
         anchor: dict[str, dict] = {}
+        self.placeholder = bool(isinstance(self.payload, dict) and self.payload.get("placeholder"))
+        if self.placeholder:
+            anchor["_placeholder"] = {"value": True}
         getattr(self, f"_a_{fam}", self._a_generic)(anchor)
-        if not any(k for k in anchor if not k.startswith("_")):
+        if not any(k for k in anchor if not k.startswith("_")) and not self.placeholder:
             self._a_generic(anchor)
         urgency = int(as_float(tools.get_trigger_fact("urgency")) or 2)
         mode, goal, action = FAMILY_GOALS.get(fam, FAMILY_GOALS["generic"])
@@ -149,7 +159,7 @@ class TriggerAnalyst(Agent):
             self._put(anchor, name, value, path)
 
     def _days_until(self, anchor: dict, key: str) -> None:
-        ref = self.tools.reference_date()
+        ref = self.tools.reference_date(strong_only=True)
         d = anchor.get(key, {}).get("date")
         if ref and d and "days_until" not in anchor:
             delta = (d - ref).days
@@ -177,6 +187,17 @@ class TriggerAnalyst(Agent):
         item, base = self._resolve_digest_item(prefer)
         if not item:
             return
+        is_event = str(item.get("kind", "")).lower() in ("cde", "event", "webinar", "conference")
+        if is_event:
+            v, p = self._pv("date", "starts_at", src=item, base=base)
+            if v:
+                self._put_date(anchor, "event_date", v, p)
+            for name, keys in (("credits", ("credits", "cde_credits")), ("fee", ("fee", "price", "cost"))):
+                v, p = self._pv(*keys)
+                if v is None:
+                    v, p = self._pv(*keys, src=item, base=base)
+                if v is not None:
+                    self._put(anchor, name, v, p, humanize(v) if isinstance(v, str) else fmt_num(as_float(v) or 0))
         for name, keys in (("title", ("title", "headline")), ("source", ("source", "journal", "publisher")),
                            ("trial_n", ("trial_n", "n", "sample_size")), ("segment", ("patient_segment", "segment", "audience")),
                            ("summary", ("summary", "abstract", "takeaway")), ("url", ("url", "link")),
@@ -190,10 +211,15 @@ class TriggerAnalyst(Agent):
             elif name == "segment":
                 self._put(anchor, name, v, p, humanize(v))
             elif name == "effective" and parse_date(v):
-                self._put_date(anchor, name, v, p)
+                if not is_event:
+                    self._put_date(anchor, name, v, p)
             else:
                 self._put(anchor, name, v, p)
+        v, p = self._pv("deadline_iso", "deadline", "effective_date")
+        if v and parse_date(v):
+            self._put_date(anchor, "effective", v, p)
         anchor["_item"] = {"value": item}
+        anchor["_is_event"] = {"value": is_event}
 
     def _a_regulation(self, anchor: dict) -> None:
         self._a_knowledge(anchor, prefer=("regulation", "compliance", "circular", "policy"))
@@ -213,6 +239,38 @@ class TriggerAnalyst(Agent):
 
     def _a_perf(self, anchor: dict, direction: int) -> None:
         metric, mpath = self._metric_name()
+        if not metric:
+            # placeholder trigger: take the merchant's own strongest move in the trigger's direction
+            best = None
+            for m in ("calls", "views", "ctr", "directions", "leads"):
+                d, p = self.tools.perf_delta(m)
+                if d is not None and d * direction > 0 and (best is None or abs(d) > abs(best[1])):
+                    best = (m, d, p)
+            if not best:
+                if direction < 0 and str(self.tools.get_merchant_fact("subscription.status", "")).lower() == "expired":
+                    d = self.tools.get_merchant_fact("subscription.days_since_expiry")
+                    if d:
+                        self._put(anchor, "expired_days", d, "merchant.subscription.days_since_expiry", fmt_num(as_float(d) or 0))
+                        plan = self.tools.get_merchant_fact("subscription.plan")
+                        if plan:
+                            self._put(anchor, "plan", plan, "merchant.subscription.plan")
+                for m in ("views", "calls"):
+                    d, p = self.tools.perf_delta(m)
+                    if d is not None:
+                        self._put_pct(anchor, f"flat_{m}", d, p)
+                anchor["_no_move"] = {"value": True}
+                anchor["_direction"] = {"value": direction}
+                return
+            if best:
+                metric, mpath = best[0], None
+                self._put(anchor, "metric", best[0], None, best[0].replace("ctr", "CTR"))
+                self._put_pct(anchor, "delta", best[1], best[2])
+                self._put(anchor, "window", "7d", "merchant.performance.delta_7d", "7d")
+                v, p = self.tools.perf_metric(best[0])
+                if v is not None:
+                    self._put(anchor, "metric_30d", v, p, fmt_pct(v) if best[0] == "ctr" else fmt_int(v))
+                anchor["_direction"] = {"value": direction}
+                return
         if metric:
             self._put(anchor, "metric", metric, mpath, humanize(metric).replace("ctr", "CTR"))
         dv, dp = self._pv("delta_pct", "change_pct", "pct_change", "delta", "change", "drop_pct", "increase_pct", "wow_pct")
@@ -224,7 +282,7 @@ class TriggerAnalyst(Agent):
                 self._put_pct(anchor, "delta", d, p)
         for name, keys in (("window", ("window", "period", "vs", "compare_to", "baseline_window", "comparison")),
                            ("current", ("value", "current", "now", "current_value", "yesterday")),
-                           ("baseline", ("baseline", "avg", "average", "previous", "prior", "baseline_value"))):
+                           ("baseline", ("baseline", "vs_baseline", "avg", "average", "previous", "prior", "baseline_value"))):
             v, p = self._pv(*keys)
             if v is None:
                 continue
@@ -234,6 +292,12 @@ class TriggerAnalyst(Agent):
                 self._put(anchor, name, f, p, txt)
             else:
                 self._put(anchor, name, v, p, humanize(v))
+        v, p = self._pv("likely_driver", "driver", "cause")
+        if v:
+            self._put(anchor, "driver", v, p, humanize(v))
+        v, p = self._pv("season_note", "seasonal_note")
+        if v and self.payload.get("is_expected_seasonal") is not False:
+            self._put(anchor, "season_note", v, p, humanize(v))
         if metric and "current" not in anchor:
             v, p = self.tools.perf_metric(metric)
             if v is not None:
@@ -253,10 +317,28 @@ class TriggerAnalyst(Agent):
             metric, mpath = self._pv("milestone", "milestone_type", "type")
         if metric:
             self._put(anchor, "metric", metric, mpath, humanize(metric))
-        v, p = self._pv("value", "threshold", "count", "milestone_value", "reached")
+        cur, cp = self._pv("value_now", "current", "current_value")
+        tgt, tp = self._pv("milestone_value", "target", "threshold")
+        if cur is not None and tgt is not None and as_float(cur) is not None and as_float(tgt) is not None:
+            self._put(anchor, "current", cur, cp, fmt_int(as_float(cur)))
+            self._put(anchor, "target", tgt, tp, fmt_int(as_float(tgt)))
+            gap = as_float(tgt) - as_float(cur)
+            if gap > 0:
+                self._derive_put(anchor, "gap", gap, fmt_int(gap), [cp, tp])
+        v, p = self._pv("value", "count", "reached") if cur is None else (None, None)
+        if v is None and cur is None and tgt is not None:
+            v, p = tgt, tp
         if v is not None:
             f = as_float(v)
             self._put(anchor, "value", v, p, fmt_int(f) if f is not None and f >= 1 else str(v))
+        if self.placeholder and "value" not in anchor and "current" not in anchor:
+            for m in ("views", "calls", "directions"):
+                val, path = self.tools.perf_metric(m)
+                if val:
+                    self._put(anchor, "metric", m, None, m)
+                    self._put(anchor, "value", val, path, fmt_int(val))
+                    anchor["_from_merchant"] = {"value": True}
+                    break
         v, p = self._pv("date", "reached_on", "reached_at")
         if v:
             self._put_date(anchor, "date", v, p)
@@ -274,7 +356,7 @@ class TriggerAnalyst(Agent):
                 self._put(anchor, name, v, p, f"{fmt_num(as_float(v))} km")
             else:
                 self._put(anchor, name, v, p)
-        v, p = self._pv("opened_on", "opened_at", "date", "detected_at")
+        v, p = self._pv("opened_on", "opened_date", "opened_at", "date", "detected_at")
         if v:
             self._put_date(anchor, "date", v, p)
 
@@ -355,7 +437,7 @@ class TriggerAnalyst(Agent):
         self._seasonal(anchor, weather=True)
 
     def _a_local_event(self, anchor: dict) -> None:
-        for name, keys in (("headline", ("headline", "title", "event", "name", "description")),
+        for name, keys in (("headline", ("headline", "title", "event", "name", "match", "description")),
                            ("location", ("location", "area", "locality", "venue", "road")),
                            ("duration", ("duration", "duration_hours", "hours")),
                            ("impact", ("impact", "expected_impact", "note")),
@@ -367,19 +449,27 @@ class TriggerAnalyst(Agent):
                 self._put(anchor, name, v, p, f"{fmt_num(as_float(v))} hours")
             else:
                 self._put(anchor, name, v, p)
-        v, p = self._pv("date", "starts_at", "start", "event_date", "time")
+        v, p = self._pv("date", "match_time_iso", "starts_at", "start", "event_date", "time")
         if v:
             self._put_date(anchor, "date", v, p)
+        if isinstance(self.payload, dict) and "is_weeknight" in self.payload:
+            anchor["_weeknight"] = {"value": bool(self.payload["is_weeknight"])}
 
     def _a_reputation(self, anchor: dict) -> None:
         for name, keys in (("theme", ("theme", "topic", "keyword", "issue")),
-                           ("count", ("count", "review_count", "mentions", "n_reviews", "occurrences")),
+                           ("count", ("count", "review_count", "mentions", "n_reviews", "occurrences", "occurrences_30d")),
                            ("window", ("window", "period", "timeframe")),
                            ("sentiment", ("sentiment", "polarity")),
                            ("rating", ("avg_rating", "rating"))):
             v, p = self._pv(*keys)
             if v is not None:
                 self._put(anchor, name, v, p, humanize(v) if name in ("window", "sentiment") else str(v))
+        v, p = self._pv("common_quote", "quote")
+        if isinstance(v, str):
+            self._put(anchor, "quote", v, p, v[:90])
+        v, p = self._pv("trend")
+        if isinstance(v, str):
+            self._put(anchor, "trend", v, p, humanize(v))
         v, p = self._pv("quotes", "samples", "examples", "sample_reviews", "excerpts")
         if isinstance(v, list) and v:
             q = v[0] if isinstance(v[0], str) else (v[0].get("text") if isinstance(v[0], dict) else None)
@@ -388,16 +478,19 @@ class TriggerAnalyst(Agent):
                 self._put(anchor, "quote", q, qp, q[:90])
 
     def _a_dormant(self, anchor: dict) -> None:
-        v, p = self._pv("days_since_last", "days_inactive", "days", "days_since_last_reply", "silent_days")
+        v, p = self._pv("days_since_last", "days_since_last_merchant_message", "days_inactive", "days", "days_since_last_reply", "silent_days")
         if v is not None:
             self._put(anchor, "days", v, p, fmt_num(as_float(v) or 0) if as_float(v) is not None else str(v))
         v, p = self._pv("last_message_at", "last_seen", "last_reply_at")
         if v:
             self._put_date(anchor, "last", v, p)
+        v, p = self._pv("last_topic")
+        if v:
+            self._put(anchor, "last_topic", v, p, humanize(v))
         self._a_recurring(anchor)
 
     def _a_recurring(self, anchor: dict) -> None:
-        for name, keys in (("topic", ("topic", "theme", "question", "prompt", "ask")), ("cadence", ("cadence", "day", "schedule"))):
+        for name, keys in (("topic", ("topic", "theme", "question", "prompt", "ask", "ask_template")), ("cadence", ("cadence", "day", "schedule"))):
             v, p = self._pv(*keys)
             if v is not None and name not in anchor:
                 self._put(anchor, name, v, p, humanize(v) if name == "cadence" else str(v))
@@ -421,8 +514,30 @@ class TriggerAnalyst(Agent):
         v, p = self._pv("amount", "price", "renewal_amount")
         if v is not None and as_float(v) is not None:
             self._put(anchor, "amount", v, p, fmt_money(as_float(v)))
+        v, p = self._pv("days_since_expiry")
+        if v is None:
+            v = self.tools.get_merchant_fact("subscription.days_since_expiry")
+            p = "merchant.subscription.days_since_expiry" if v is not None else None
+        if v is not None and str(self.tools.get_merchant_fact("subscription.status", "")).lower() != "active":
+            self._put(anchor, "expired_days", v, p, fmt_num(as_float(v) or 0))
+            anchor.pop("days_left", None)
+        v, p = self._pv("perf_dip_pct")
+        if v is not None:
+            self._put_pct(anchor, "dip", v, p)
+        v, p = self._pv("lapsed_customers_added_since_expiry", "lapsed_customers")
+        if v is not None:
+            self._put(anchor, "lapsed_new", v, p, fmt_num(as_float(v) or 0))
 
     def _a_profile(self, anchor: dict) -> None:
+        v, p = self._pv("verified")
+        if v is False or (v is None and self.tools.get_merchant_fact("identity.verified") is False):
+            self._put(anchor, "unverified", "false", p or "merchant.identity.verified", "not verified")
+            v, p = self._pv("verification_path", "path")
+            if v:
+                self._put(anchor, "verify_path", v, p, humanize(v).replace(" or ", " or a "))
+            v, p = self._pv("estimated_uplift_pct", "uplift_pct")
+            if v is not None:
+                self._put_pct(anchor, "uplift", v, p)
         v, p = self._pv("missing_fields", "missing", "gaps", "fields")
         if isinstance(v, list) and v:
             self._put(anchor, "missing", ", ".join(map(str, v[:3])), p, ", ".join(humanize(x) for x in v[:3]))
@@ -454,7 +569,7 @@ class TriggerAnalyst(Agent):
             self._put_date(anchor, "date", v, p)
 
     def _a_customer_recall(self, anchor: dict) -> None:
-        v, p = self._pv("last_visit", "last_visit_date")
+        v, p = self._pv("last_visit", "last_visit_date", "last_service_date", "last_refill", "trial_date", "trial_completed")
         if v is None:
             v = self.tools.get_customer_fact("relationship.last_visit")
             p = "customer.relationship.last_visit" if v else None
@@ -463,9 +578,32 @@ class TriggerAnalyst(Agent):
         v, p = self._pv("due_date", "recall_date", "due_on")
         if v:
             self._put_date(anchor, "due", v, p)
-        v, p = self._pv("service", "service_due", "recall_type", "treatment")
+        v, p = self._pv("service", "service_due", "recall_type", "treatment", "next_step_window_open")
         if v:
-            self._put(anchor, "service", v, p, humanize(v))
+            self._put(anchor, "service", v, p, humanize(v).replace("6 month", "6-month").replace("30day", "30-day"))
+        v, p = self._pv("molecule_list", "medicines", "items")
+        if isinstance(v, list) and v:
+            self._put(anchor, "molecules", ", ".join(map(str, v[:4])), p, ", ".join(map(str, v[:4])))
+        v, p = self._pv("stock_runs_out_iso", "runs_out_on")
+        if v:
+            self._put_date(anchor, "runs_out", v, p)
+        if isinstance(self.payload, dict) and self.payload.get("delivery_address_saved"):
+            anchor["_delivery_saved"] = {"value": True}
+        v, p = self._pv("days_since_last_visit", "days_since")
+        if v is not None:
+            self._put(anchor, "days_since", v, p, fmt_num(as_float(v) or 0))
+        v, p = self._pv("previous_focus", "focus", "goal")
+        if v:
+            self._put(anchor, "focus", v, p, humanize(v))
+        v, p = self._pv("previous_membership_months", "membership_months")
+        if v is not None:
+            self._put(anchor, "member_months", v, p, fmt_num(as_float(v) or 0))
+        v, p = self._pv("wedding_date", "event_date")
+        if v:
+            self._put_date(anchor, "wedding", v, p)
+        v, p = self._pv("days_to_wedding", "days_to_event")
+        if v is not None:
+            self._put(anchor, "days_to_event", v, p, fmt_num(as_float(v) or 0))
         svcs = self.tools.get_customer_fact("relationship.services_received")
         if isinstance(svcs, list) and svcs:
             self._put(anchor, "last_service", svcs[-1], f"customer.relationship.services_received[{len(svcs) - 1}]", humanize(svcs[-1]))
@@ -473,7 +611,7 @@ class TriggerAnalyst(Agent):
         if v is not None:
             self._put(anchor, "months", v, p, fmt_num(as_float(v) or 0))
         elif "last_visit" in anchor:
-            ref = self.tools.reference_date() or anchor.get("due", {}).get("date")
+            ref = anchor.get("due", {}).get("date") or self.tools.reference_date(strong_only=True)
             lv = anchor["last_visit"]["date"]
             if ref and ref > lv:
                 m = months_between(lv, ref)
@@ -482,14 +620,17 @@ class TriggerAnalyst(Agent):
         self._slots(anchor)
 
     def _slots(self, anchor: dict) -> None:
-        v, p = self._pv("slots", "available_slots", "open_slots", "slot_options")
+        v, p = self._pv("slots", "available_slots", "open_slots", "slot_options", "next_session_options")
         if not v:
             v = self.tools.get_merchant_fact("availability.slots") or self.tools.get_merchant_fact("available_slots")
             p = "merchant.availability.slots" if self.tools.get_merchant_fact("availability.slots") else "merchant.available_slots"
         if isinstance(v, list):
             slots = []
             for i, s in enumerate(v[:2]):
-                raw = s.get("start") or s.get("datetime") or s.get("label") if isinstance(s, dict) else s
+                if isinstance(s, dict) and s.get("label"):
+                    self._put(anchor, f"slot{i + 1}", s["label"], f"{p}[{i}].label", str(s["label"]))
+                    continue
+                raw = s.get("start") or s.get("iso") or s.get("datetime") if isinstance(s, dict) else s
                 sp = f"{p}[{i}]" + (".start" if isinstance(s, dict) and s.get("start") else ".datetime" if isinstance(s, dict) and s.get("datetime") else ".label" if isinstance(s, dict) else "")
                 dt = parse_datetime(raw) if isinstance(raw, str) and re.match(r"\d{4}-\d{2}-\d{2}", raw) else None
                 if dt:
@@ -498,7 +639,8 @@ class TriggerAnalyst(Agent):
                 elif raw:
                     slots.append((raw, sp, str(raw)))
             for i, (raw, sp, txt) in enumerate(slots):
-                self._put(anchor, f"slot{i + 1}", raw, sp, txt)
+                if f"slot{i + 1}" not in anchor:
+                    self._put(anchor, f"slot{i + 1}", raw, sp, txt)
 
     def _a_customer_appointment(self, anchor: dict) -> None:
         v, p = self._pv("appointment_at", "datetime", "slot", "time", "scheduled_at", "appointment_time")
@@ -513,11 +655,58 @@ class TriggerAnalyst(Agent):
         if v:
             self._put(anchor, "staff", v, p)
 
+    def _a_planning(self, anchor: dict) -> None:
+        v, p = self._pv("intent_topic", "topic", "program", "idea")
+        if v:
+            self._put(anchor, "topic", v, p, humanize(v))
+        v, p = self._pv("merchant_last_message", "last_message", "request")
+        if v:
+            self._put(anchor, "ask", v, p, str(v)[:120])
+
+    def _a_seasonal(self, anchor: dict) -> None:
+        v, p = self._pv("season", "season_name")
+        if v:
+            self._put(anchor, "season", v, p, humanize(v).title())
+        v, p = self._pv("trends", "demand_shifts", "signals")
+        if isinstance(v, list):
+            ups, downs = [], []
+            for i, t in enumerate(v[:6]):
+                m = re.match(r"(.+?)_?(?:demand)?_?([+-]\d+)$", str(t))
+                if not m:
+                    continue
+                item = humanize(m.group(1)).replace(" demand", "").strip()
+                item = item.upper() if len(item) <= 3 else item
+                (ups if m.group(2).startswith("+") else downs).append((item, m.group(2), f"{p}[{i}]"))
+            for j, (item, d, path) in enumerate(ups[:3]):
+                self._put(anchor, f"up{j + 1}", str(v), path, f"{item} {d}%")
+            for j, (item, d, path) in enumerate(downs[:1]):
+                self._put(anchor, f"down{j + 1}", str(v), path, f"{item} {d.replace('-', '−')}%")
+        if not any(k.startswith("up") for k in anchor):
+            self._seasonal(anchor)
+
+    def _a_supply(self, anchor: dict) -> None:
+        for name, keys in (("molecule", ("molecule", "product", "item", "drug")), ("manufacturer", ("manufacturer", "mfr", "brand"))):
+            v, p = self._pv(*keys)
+            if v:
+                self._put(anchor, name, v, p)
+        v, p = self._pv("affected_batches", "batches")
+        if isinstance(v, list) and v:
+            self._put(anchor, "batches", ", ".join(map(str, v[:4])), p, ", ".join(map(str, v[:4])))
+        aid, _ = self._pv("alert_id", "digest_item_id", "top_item_id")
+        if isinstance(aid, str):
+            hits = self.tools.search_category_digest(item_id=aid)
+            if hits and hits[0][0].get("id") == aid:
+                item, base = hits[0]
+                for name, keys in (("title", ("title",)), ("source", ("source",)), ("actionable", ("actionable",))):
+                    vv, pp = self._pv(*keys, src=item, base=base)
+                    if vv:
+                        self._put(anchor, name, vv, pp)
+
     def _a_generic(self, anchor: dict) -> None:
         """Unknown trigger kind: surface up to 3 scalar payload facts verbatim (no interpretation)."""
         n = 0
         for k, v in (self.payload or {}).items():
-            if n >= 3 or k in ("merchant_id", "customer_id", "category") or isinstance(v, (dict, list)):
+            if n >= 3 or k in ("merchant_id", "customer_id", "category", "placeholder") or v is None or isinstance(v, (dict, list)):
                 continue
             if isinstance(v, bool):
                 continue
@@ -554,7 +743,10 @@ class TriggerAnalyst(Agent):
             "recurring": "scheduled curiosity touch",
             "account": f"{t('plan')} plan: {t('days_left')} days left",
             "customer_recall": f"recall due; last visit {t('last_visit')}",
-            "customer_appointment": f"appointment {t('when')}",
+            "customer_appointment": f"appointment {t('when') or 'tomorrow'}",
+            "planning": f"merchant asked about {t('topic')}: '{t('ask')}'",
+            "seasonal": f"{t('season')} demand shift: {t('up1')}",
+            "supply": f"batch alert: {t('molecule')} {t('batches')}",
         }
         s = parts.get(fam) or f"{humanize(kind)} event"
         return re.sub(r"\s+", " ", s.replace("None", "")).strip()

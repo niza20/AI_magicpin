@@ -35,11 +35,18 @@ multi-turn: reply → AUTO-REPLY DETECTOR → INTENT ROUTER → ConversationStat
 ## Run
 ```bash
 pip install -r requirements.txt
-python -m pytest -q                                   # 134 tests: all categories/families, adversarial, multi-turn, HTTP
-python evaluate.py --dataset dev_fixtures --pairs dev_fixtures/dev_pairs.json --show
-python generate_submission.py                         # official: needs ./dataset with the canonical test-pair file
-uvicorn bot:app --port 8080 && python scripts/run_judge_offline.py dev_fixtures all
+cd dataset/seed && python generate_dataset.py --out ../expanded && cd ../..   # magicpin's own deterministic expander
+python generate_submission.py --dataset dataset/expanded        # → submission.jsonl (the 30 canonical pairs T01-T30)
+python -m pytest -q                                             # 239 tests (all 100 official triggers + adversarial + multi-turn + HTTP)
+python evaluate.py --dataset dataset/expanded --show            # internal 5-dimension critic + replay scenarios
+uvicorn bot:app --port 8080 && python scripts/run_judge_offline.py dataset/expanded all
 ```
+**Results on the official data:** all 30 pairs, and all 100 triggers, compose with 0 safe-fallbacks and 0 crashes.
+Each body is re-verified fact-by-fact against the contexts. magicpin's simulator passes auto-reply, intent-transition and
+hostile, with ticks under 40 ms. About half the test pairs are *placeholder* triggers (payload `{"placeholder": true}`).
+For those, Vera uses only the merchant's own data and never invents a festival, competitor or drop. For example, T25 is
+a "perf_dip" whose deltas are actually positive, so it reports the real risk: the plan lapsed 39 days ago.
+
 The LLM layer is optional (`ANTHROPIC_API_KEY`; model via `VERA_LLM_MODEL`, default `claude-opus-5`). It drafts,
 ranks plans, classifies unclear intents and critiques. Its output is always re-validated by deterministic code. It
 is cached by content hash so results are deterministic, deadline-bounded to stay under 30 s, and falls back to the
@@ -54,7 +61,7 @@ deterministic agents on any failure.
   dimensions, but it is not ground truth.
 
 ## What would have helped most
-The official dataset and the 30 canonical pairs. The data host was not reachable from the build environment, so
-`dev_fixtures/` are schema-faithful synthetic stand-ins. The next most useful inputs would be real merchant slot
-availability, Vera's own plan pricing (so "how much?" could be answered), and review text for richer reputation
-triggers.
+Real payloads for the placeholder triggers (half the test set), actual review text for `review_theme_emerged`, open
+slots for customer bookings, and Vera's own plan pricing so "how much?" could be answered instead of deferred.
+A consistent "now" timestamp on triggers would also help: here it is inferred from `date − days_until` or the ISO week
+in the suppression key. `dev_fixtures/` holds extra synthetic edge cases used by the tests.

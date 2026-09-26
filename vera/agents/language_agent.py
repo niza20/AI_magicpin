@@ -39,14 +39,16 @@ class LanguageAgent(Agent):
             lang, source = normalise_pref(tools.get_customer_fact("identity.language_pref")
                                           or tools.get_customer_fact("identity.language")), "customer language_pref"
         if not lang and not customer_facing:
-            for h in reversed(tools.get_conversation_history(6)):
-                if str(h.get("from", "")).lower() in ("merchant", "mx", "user") and (h.get("body") or h.get("text")):
-                    lang, source = detect_language(h.get("body") or h.get("text")), "merchant's last message"
-                    break
-        if not lang:
             lang = normalise_pref(tools.get_merchant_fact("identity.languages")
                                   or tools.get_merchant_fact("identity.language_pref"))
             source = "merchant identity.languages"
+            if lang == "en":
+                # history can upgrade an English-listed merchant to Hinglish if that's how they actually write
+                for h in reversed(tools.get_conversation_history(6)):
+                    if str(h.get("from", "")).lower() in ("merchant", "mx", "user") and (h.get("body") or h.get("text")):
+                        if detect_language(h.get("body") or h.get("text")) in ("hi-en", "hi"):
+                            lang, source = "hi-en", "merchant writes Hinglish in history"
+                        break
         if not lang:
             lang, source = "en", "default"
         if lang == "hi" and not customer_facing:

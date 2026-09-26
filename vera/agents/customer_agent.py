@@ -5,6 +5,7 @@ and sets send_as=merchant_on_behalf. Never exposes phone numbers or other custom
 """
 from __future__ import annotations
 
+import re
 from typing import Optional
 
 from ..tools import ContextTools
@@ -26,9 +27,9 @@ class CustomerAgent(Agent):
         if not tools.has_customer:
             return None
         ident = tools.get_customer_fact("identity") or {}
-        name = str(first_present(ident, ["first_name", "name"], "") or "").split()[0] if first_present(ident, ["first_name", "name"]) else ""
+        name = display_name(first_present(ident, ["first_name", "name"], ""))
         consent = tools.get_customer_fact("consent") or {}
-        ok, why = self._consent(consent, ta.family, ta.trigger_type)
+        ok, why = self._consent(consent, ta.family, ta.trigger_type, tools.get_customer_fact("preferences") or {})
         rel = tools.get_customer_fact("relationship") or {}
         facts = []
         for k in ("last_visit", "visits_total", "services_received"):
@@ -45,8 +46,8 @@ class CustomerAgent(Agent):
         return plan
 
     @staticmethod
-    def _consent(consent: dict, family: str, kind: str) -> tuple[bool, str]:
-        if not consent:
+    def _consent(consent: dict, family: str, kind: str, prefs: dict) -> tuple[bool, str]:
+        if not consent or not (consent.get("opted_in_at") or consent.get("opted_in") or consent.get("scope")):
             return False, "no consent record"
         if consent.get("opted_out") or consent.get("revoked") or str(consent.get("status", "")).lower() in ("revoked", "opted_out"):
             return False, "customer opted out"
@@ -57,6 +58,20 @@ class CustomerAgent(Agent):
         wanted = PURPOSE_SCOPES.get(family, ()) + tuple(kind.lower().split("_"))
         if any(any(w in s for w in wanted if len(w) > 3) for s in scopes):
             return True, f"scope covers purpose ({', '.join(scopes)})"
-        if any(s in PROMO_SCOPES for s in scopes):
-            return True, "promotional scope"
+        reminder_ok = prefs.get("reminder_opt_in") is True
+        transactional = family in ("customer_appointment", "customer_recall")
+        if transactional and reminder_ok and scopes:
+            return True, f"opted in ({', '.join(scopes)}) with reminder_opt_in=true"
+        if family == "customer_recall" and any(any(p in s for p in ("promot", "offer", "marketing")) for s in scopes):
+            return True, f"win-back covered by promotional consent ({', '.join(scopes)})"
         return False, f"scope {scopes} does not cover {humanize(kind)}"
+
+
+def display_name(raw) -> str:
+    """'Mr. Sharma' → 'Sharma' is kept with honorific; '(walk-in, no profile)' → ''."""
+    s = str(raw or "").strip()
+    if not s or s.startswith("(") or "no profile" in s.lower() or s.lower() in ("unknown", "anonymous"):
+        return ""
+    if re.match(r"^(mr|mrs|ms|miss|dr|shri|smt)\.?\s+\S", s, re.I):
+        return s
+    return s.split()[0]

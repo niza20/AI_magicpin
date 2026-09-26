@@ -97,11 +97,13 @@ class CategoryExpert(Agent):
             w = label.split()
             return " ".join([w[0].title()] + w[1:]) if w and scope and scope.split("_")[0].isalpha() and len(w) > 1 else label
         if isinstance(scope, str) and scope.strip() and city and city.lower() not in scope.lower() \
-                and "_" in scope and scope.split("_")[0].isalpha() and scope.split("_")[0].lower() not in ("all", "india", "national", "similar", "solo", "independent"):
+                and "_" in scope and scope.split("_")[0].isalpha() and scope.split("_")[0].lower() not in ("all", "india", "national", "similar", "solo", "independent", "metro", "metros",
+                                                                             "tier1", "tier2", "urban", "pan", "top", "city", "neighbourhood"):
             # benchmark is scoped to another city → don't imply it's this merchant's local market
             return f"the {noun} benchmark ({cap_city(humanize(scope))})"
         if isinstance(scope, str) and scope.strip():
             s = humanize(scope)
+            s = s[0].upper() + s[1:] if s.split()[0].lower() in ("metro", "metros", "tier1", "tier2", "urban") else s
             s = re.sub(r"\bpractices?\b", "practices", s)
             words = s.split()
             city = str(tools.get_merchant_fact("identity.city") or "")

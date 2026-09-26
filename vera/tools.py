@@ -76,7 +76,9 @@ class ContextTools:
     def get_peer_stat(self, name: str) -> tuple[Optional[float], Optional[str]]:
         self._log("get_peer_stat", name)
         ps = self._c.get("peer_stats") or {}
-        for key in (name, f"avg_{name}", f"median_{name}", f"{name}_median", f"typical_{name}"):
+        sing = name[:-1] if name.endswith("s") else name
+        for key in (name, f"avg_{name}", f"median_{name}", f"{name}_median", f"typical_{name}", f"avg_{name}_30d",
+                    f"avg_{sing}_count", f"avg_{sing}s_30d"):
             if key in ps and as_float(ps[key]) is not None:
                 return as_float(ps[key]), f"category.peer_stats.{key}"
         return None, None
@@ -143,14 +145,29 @@ class ContextTools:
                 for i, c in enumerate(self._c.get("patient_content_library") or self._c.get("content_library") or [])
                 if isinstance(c, dict)]
 
-    def reference_date(self):
-        """'Now' for this composition, taken from context (never the wall clock → deterministic)."""
-        for path in ("trigger.detected_at", "trigger.created_at", "trigger.payload.date", "trigger.ts"):
-            d = parse_date(deep_get({"trigger": self._t}, path))
+    def reference_date(self, strong_only: bool = False):
+        """'Now' for this composition, inferred from context (never the wall clock → deterministic).
+        Order: explicit detection time → event date minus days_until → ISO week in the suppression key
+        (its Sunday) → a few days before expiry."""
+        from datetime import date, timedelta
+        for path in ("detected_at", "created_at", "ts", "fired_at"):
+            d = parse_date(self._t.get(path))
             if d:
                 return d
+        p = self._t.get("payload") or {}
+        for dk, nk in (("date", "days_until"), ("wedding_date", "days_to_wedding"), ("festival_date", "days_until")):
+            d, n = parse_date(p.get(dk)), p.get(nk)
+            if d and isinstance(n, (int, float)):
+                return d - timedelta(days=int(n))
+        m = re.search(r"(\d{4})-W(\d{2})", str(self._t.get("suppression_key") or "") + " " + str(self._t.get("id") or ""))
+        if m:
+            try:
+                return date.fromisocalendar(int(m.group(1)), int(m.group(2)), 7)
+            except ValueError:
+                pass
+        if strong_only:
+            return None
         exp = parse_date(self._t.get("expires_at"))
         if exp:
-            from datetime import timedelta
-            return exp - timedelta(days=7)
+            return exp - timedelta(days=3)
         return None

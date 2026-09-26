@@ -29,7 +29,11 @@ class SuppressionAgent(Agent):
         cid = tools.get_customer_fact("customer_id") or tools.get_trigger_fact("customer_id")
         slug = tools.category_slug or "general"
         given = tools.get_trigger_fact("suppression_key")
-        if isinstance(given, str) and given.strip():
+        short = re.match(r"(m_\d+)", mid)
+        if isinstance(given, str) and given.strip() and (mid in given or (short and re.search(re.escape(short.group(1)) + r"(?!\d)", given))
+                                                        or (cid and str(cid).split("_for_")[0] in given)):
+            key = given.strip()          # dataset key already scoped to this merchant/customer → keep canonical
+        elif isinstance(given, str) and given.strip():
             parts = given.strip().split(":")
             if mid not in given:
                 # merchant-scope keys like "research:dentists:2026-W17" are shared across merchants → scope them

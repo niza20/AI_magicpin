@@ -17,9 +17,12 @@ from .base import Agent
 FAMILY_PRIORITY = {
     "perf_dip": ["ctr_gap", "ctr", "peer_ctr", "calls", "views", "offer", "stale_days", "locality"],
     "perf_spike": ["views", "calls", "offer", "ctr", "locality"],
-    "knowledge": ["segment_match", "lapsed", "customers_total", "ctr_gap", "locality"],
+    "knowledge": ["segment_count", "segment_match", "lapsed", "customers_total", "ctr_gap", "locality"],
+    "planning": ["offer", "praise", "customers_total", "locality"],
+    "seasonal": ["offer", "calls", "views", "locality"],
+    "supply": ["customers_total", "locality"],
     "regulation": ["locality", "customers_total", "segment_match"],
-    "competitor": ["rating", "reviews", "peer_rating", "offer", "locality", "ctr_gap"],
+    "competitor": ["rating", "reviews", "peer_rating", "offer", "praise", "ctr_above", "locality", "ctr_gap"],
     "festival": ["offer", "expired_offer", "views", "locality"],
     "weather": ["offer", "locality", "views"],
     "local_event": ["locality", "offer", "calls"],
@@ -103,7 +106,12 @@ class PersonalizationAgent(Agent):
             pz["expired_offer"]["status"] = inactive[0][1]
         cat = tools.get_catalog_offers()
         if cat:
-            put("catalog_offer", cat[0][0], cat[0][1], cat[0][0])
+            # brief §3: "Haircut @ ₹99" beats "10% off" — rank service+price, then free service, never % discounts first
+            def rank(t):
+                tl = t[0].lower()
+                return 0 if "@ ₹" in t[0] or "@₹" in t[0] else 1 if "free" in tl and "%" not in tl else 3 if "%" in tl else 2
+            best = sorted(cat, key=rank)[0]
+            put("catalog_offer", best[0], best[1], best[0])
 
         agg = tools.get_merchant_fact("customer_aggregate") or {}
         for name, keys in (("customers_total", ("total_unique_ytd", "total_unique", "active_count", "total", "unique_customers")),
@@ -124,6 +132,24 @@ class PersonalizationAgent(Agent):
             if seg and _overlap(str(seg), s_low):
                 put("segment_match", s, f"merchant.signals[{i}]", humanize(str(seg)).replace("adults", "adult"))
 
+        if "ctr" in pz and "peer_ctr" in pz and pz["ctr"]["value"] >= pz["peer_ctr"]["value"]:
+            pz["ctr_above"] = {"text": f"{pz['ctr']['text']} vs {pz['peer_ctr']['text']}", "value": True,
+                               "fid": pz["ctr"]["fid"], "path": pz["ctr"]["path"]}
+        for i, rt in enumerate(tools.get_merchant_fact("review_themes") or []):
+            if not isinstance(rt, dict) or not rt.get("theme"):
+                continue
+            sent = str(rt.get("sentiment", "")).lower()
+            key = "praise" if sent.startswith("pos") else "complaint" if sent.startswith("neg") else None
+            if key and key not in pz:
+                put(key, rt["theme"], f"merchant.review_themes[{i}].theme", humanize(rt["theme"]))
+                if rt.get("common_quote"):
+                    put(f"{key}_quote", rt["common_quote"], f"merchant.review_themes[{i}].common_quote", str(rt["common_quote"]))
+        seg = ta.anchor.get("segment", {}).get("value")
+        if seg:
+            for k, v in (agg or {}).items():
+                if k.endswith("_count") and _overlap(str(seg), k) and as_float(v):
+                    put("segment_count", v, f"merchant.customer_aggregate.{k}", fmt_int(as_float(v)))
+                    break
         hist = tools.get_conversation_history(4)
         if hist:
             last = hist[-1]

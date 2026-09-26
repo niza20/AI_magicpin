@@ -105,13 +105,14 @@ def plan_tick(now: str, trigger_ids: list[str], deadline: float) -> list[dict]:
         if not trg:
             continue
         mid, cid = _trigger_ids(trg)
+        # The judge's `available_triggers` is authoritative ("active right now"); its clock may be wall time
+        # (judge_simulator uses utcnow) while dataset expiries are in simulated time — so expiry only ranks.
         exp = parse_datetime(trg.get("expires_at"))
-        if exp and now_dt > exp:
-            continue                                   # stale trigger → restraint
+        fresh = 0 if (exp and now_dt > exp) else 1
         if _mm(mid).get("opted_out"):
             continue                                   # merchant said stop
         key = (mid or "?") + (f"/{cid}" if cid else "")
-        urg = int(trg.get("urgency") or 1)
+        urg = int(trg.get("urgency") or 1) + 10 * fresh
         if key not in best or urg > best[key][0]:
             best[key] = (urg, tid, trg)
     jobs = sorted(best.values(), key=lambda x: -x[0])[:20]
