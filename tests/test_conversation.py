@@ -367,3 +367,20 @@ def test_every_category_merchant_and_customer_scripts_never_stall():
                 r = respond(st, msg)
                 b = r.get("body", "")
                 assert r["action"] == "send" and "get back to you" not in b and not b.startswith("Noted, "), (tid, msg, b or r.get("rationale"))
+
+
+def test_draft_requests_reshow_the_draft_and_checkin_is_not_a_winback():
+    """'give me draft' / 'sent draft here' re-show the exact draft; a retention check-in never says 'it's been a while'."""
+    from vera.dataset import load_dataset
+    import os
+    ds = load_dataset(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "dataset", "expanded"))
+    t = ds.triggers["trg_061_festival_upcoming_m_037_pooja_gym_bang"]
+    m = ds.merchants[t["merchant_id"]]; cat = ds.category_for(m)
+    st = new_state("d", cat, m, t, None, compose(cat, m, t, None)["body"])
+    first = respond(st, "Yes, go ahead")["body"]
+    assert "been a while" not in first and "check-in" in first.lower()
+    for msg in ("give me draft", "GO", "sent draft here", "draft?"):
+        r = respond(st, msg)
+        assert r["action"] == "send", (msg, r)
+        if msg != "GO":
+            assert "Hope your routine is going well" in r["body"], (msg, r["body"])

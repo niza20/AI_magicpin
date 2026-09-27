@@ -167,7 +167,7 @@ _PROMISES = [  # (kind, pattern over Vera's last offer) — first match wins; or
     ("summary", r"2-min summary|summary"),
     ("renewal", r"renew|reactivat"),
     ("verification", r"verification|verify"),
-    ("reminder", r"reminder bhej|remind you|reminder a day|ek din pehle reminder"),
+    ("reminder", r"reminder bhej|remind you|reminder a day|ek din pehle reminder|reminder chahiye|reminder (a|one) week|hafte pehle reminder|want a reminder"),
     ("customer_msg", r"check-in whatsapp|whatsapp draft|nudge|batch check|wapas bula|win-?back"),
     ("pin", r"\bpin\b"),
     ("program", r"pehla draft|first draft|launch post"),
@@ -184,7 +184,9 @@ _OTHER_PEOPLE = re.compile(r"\b(which|who|kaun|kis|how many)\b[^.?!]{0,25}\b(oth
 _IDEAS_Q = re.compile(r"\b((other|more|aur|next|new|koi aur|aur koi|koi|dusr\w*|doosr\w*)\s+(marketing\s+)?(strateg\w*|ideas?|suggestions?|options?|tips?|ways?|tareeke|tarike|sujhav)"
                       r"|marketing\s+(strateg\w*|ideas?|tips?|plan)|what\s+else\b|aur\s+kya\b|kya\s+aur\b|how\s+(can|do)\s+i\s+(grow|get\s+more|increase|improve)"
                       r"|suggest\s+(something|more|me)|any\s+(other\s+)?(ideas?|suggestions?)|next\s+step|^\s*ideas?\s*[!.?]*\s*$)", re.I)
-_DRAFT_Q = re.compile(r"\b(where|show|send|see|share|resend|kahan|kaha|dikhao|dikha\s*do|bhejo|bhej\s*do)\b[^.?!]{0,25}\b(draft|preview|post|message|msg)\b"
+_DRAFT_Q = re.compile(r"\b(where|show|send|sent|see|share|resend|give|get|paste|copy|need|want|kahan|kaha|dikhao|dikha\s*do|bhejo|bhej\s*do|de\s*do|dedo)\b[^.?!]{0,25}\b(draft|preview|post|message|msg)\b"
+                      r"|^\s*(the\s+|my\s+)?(draft|preview)\s*(here|please|pls|plz|chahiye|do|dedo|de\s*do|bhejo|dikhao|yahan|yaha)?[\s?!.]*$"
+                      r"|\b(draft|preview)\s+(here|please|pls|plz|chahiye|dedo|de\s*do|bhejo|dikhao|yahan|yaha)\b"
                       r"|\b(draft|preview)\b[^.?!]{0,15}\b(where|kahan|kaha|nahi\s+(aaya|mila|dikha)|not\s+(here|shown|visible|received)|missing)\b"
                       r"|\b(i\s+)?(can'?t|cannot|don'?t)\s+see\s+(the\s+|any\s+)?(draft|preview|post)", re.I)
 _NO_ONLY = re.compile(r"^\s*(no|nope|nah|nahi|nahin|na|no thanks|no changes?|nothing|kuch nahi|all good|sab theek|theek hai)[\s!.,🙂👍]*$", re.I)
@@ -192,16 +194,28 @@ _PICK = re.compile(r"^\s*(?:option\s*|idea\s*|no\.?\s*)?([1-3])\b|^\s*(first|sec
 _ORD = {"first": 1, "pehla": 1, "pehli": 1, "second": 2, "doosra": 2, "doosri": 2, "dusra": 2, "third": 3, "teesra": 3, "teesri": 3}
 
 
+_CTA_LINE = re.compile(r"\bGO\b|\bedits?\b|\bYES\b|^\s*\(")
+
+
 def draft_core(body: str) -> str:
-    """The artifact inside a delivery message: lines after '↓', minus the trailing GO/edits instruction."""
+    """The artifact inside a delivery message: lines after '↓' (or the whole message, e.g. a checklist), minus the trailing CTA lines."""
     lines = (body or "").split("\n")
     idx = [i for i, ln in enumerate(lines) if "↓" in ln]
-    if not idx:
-        return body.strip()
-    core = lines[idx[0] + 1:]
-    while core and (re.search(r"\bGO\b|\bedits?\b", core[-1]) or re.match(r"\s*\(", core[-1])):
+    core = lines[idx[0] + 1:] if idx else lines
+    if not idx and len(core) > 2 and "✅" in core[0] and len(core[0]) < 60:
+        core = core[1:]                                  # "Here's your checklist ✅" header
+    while len(core) > 1 and _CTA_LINE.search(core[-1]):
         core = core[:-1]
     return "\n".join(core).strip() or body.strip()
+
+
+def draft_cta(body: str) -> str:
+    """The CTA line(s) a delivery ended with (so a re-shown checklist keeps its own question, not 'goes live')."""
+    lines = (body or "").split("\n")
+    tail = []
+    while len(lines) > 1 and _CTA_LINE.search(lines[-1]):
+        tail.insert(0, lines.pop())
+    return "\n".join(tail).strip()
 
 
 def promised(state) -> tuple[str, Optional[str]]:
@@ -314,8 +328,12 @@ class ReplyEngine:
         if _DRAFT_Q.search(message):
             if state.last_draft:
                 core = draft_core(state.last_draft)
-                tail = b.t("Reply GO and it goes live, or send any edits.", "GO reply karein toh live kar doon, ya edits bhej dijiye.") if not state.draft_live \
-                    else b.t("This one is already live ✅ Want 3 more ideas? Reply YES.", "Yeh already live hai ✅ 3 aur ideas chahiye? YES reply karein.")
+                doc = "↓" not in state.last_draft          # a checklist / summary: nothing to publish
+                if state.draft_live:
+                    tail = b.t("Saved here for you ✅ Want 3 more ideas? Reply YES.", "Yahin save hai ✅ 3 aur ideas chahiye? YES reply karein.") if doc \
+                        else b.t("This one is already live ✅ Want 3 more ideas? Reply YES.", "Yeh already live hai ✅ 3 aur ideas chahiye? YES reply karein.")
+                else:
+                    tail = (draft_cta(state.last_draft) if doc else "") or b.t("Reply GO and it goes live, or send any edits.", "GO reply karein toh live kar doon, ya edits bhej dijiye.")
                 return self._send(state, w, [b.t(f"Here it is ↓\n{core}\n{tail}", f"Yeh raha ↓\n{core}\n{tail}"),
                                              b.t(f"Sure — here's the draft ↓\n{core}\n{tail}", f"Zaroor — draft yeh raha ↓\n{core}\n{tail}")], "binary_yes_stop",
                                   "Merchant asked for the draft → re-showed the exact artifact.")
@@ -401,6 +419,10 @@ class ReplyEngine:
                                  f"Bhej diya ✅ WhatsApp aaj aapke {cn} ko ja raha hai. Replies aur bookings yahin share karungi."),
                 "review_replies": ("Posted ✅ The owner replies go up on those reviews today.", "Post ho gaya ✅ Owner replies aaj un reviews pe lag jaayenge."),
                 "pin": ("Pinned ✅ The offer is now at the top of your Google profile.", "Pin ho gaya ✅ Offer ab aapke Google profile ke top pe hai."),
+                "reminder": ("Set ✅ I'll remind you here a week before the deadline, with the checklist.",
+                             "Set ho gaya ✅ Deadline se ek hafte pehle checklist ke saath yahin reminder bhej dungi."),
+                "checklist": ("Saved ✅ The checklist stays here — I'll check in before the deadline.",
+                              "Save ho gaya ✅ Checklist yahin hai — deadline se pehle check-in karungi."),
                 "summary": (f"Done ✅ The forward-ready note is formatted — share it with your {cn} whenever you like.",
                             f"Ho gaya ✅ Forward-ready note format ho gaya — jab chahein {cn} ke saath share kijiye."),
             }.get(kind, ("Scheduled ✅ Your post is queued and goes live on your listing today.",
@@ -474,6 +496,8 @@ class ReplyEngine:
             w["lang"] = LanguagePlan(language=state.language, tone=w["lang"].tone, style_rules=w["lang"].style_rules)
         w["brief"] = Brief(w["ta"], w["pz"], w["prof"], w["lang"], w["cust"], w["tools"])
         w["promise"] = promised(state)
+        opener = (state.bot_bodies() or [""])[0]
+        w["checkin"] = bool(re.search(r"check-in|existing (members|customers|patients|clients)|regulars|aate rahein", opener, re.I))
         return w
 
     def _send(self, state: ConversationState, w: dict, bodies, cta: str, rationale: str, allow: tuple = ()) -> dict:
@@ -740,6 +764,13 @@ class ReplyEngine:
                    f"Please check the batch number on your strip — if it matches, don't take it and bring it to us for a free replacement. Reply here if you're unsure. — {name}")
             return [b.t(f"Draft ready ✅ Batch-check WhatsApp for customers who bought {mol} ↓\n{msg}\n{go_en}",
                         f"Draft ready ✅ {mol} lene wale customers ke liye batch-check WhatsApp ↓\n{msg}\n{go_hi}")]
+        if kind == "customer_msg" and w.get("checkin"):
+            # existing, active customers: a friendly check-in — no "it's been a while", no new-joiner offer
+            off = offer or b.offer()[0]
+            off = off if off and not re.search(r"first|trial|new|intro|join", off, re.I) else None
+            tail = f" {off} is on this month if you'd like it." if off else ""
+            msg = f"Hi from {name} 👋 Hope your routine is going well! Just checking in — we'd love to see you this week.{tail} Reply here to book your next slot. — {name}"
+            return [b.t(f"Draft ready ✅ Check-in WhatsApp for your {cn} ↓\n{msg}\n{go_en}", f"Draft ready ✅ {cn} ke liye check-in WhatsApp ↓\n{msg}\n{go_hi}")]
         if kind == "customer_msg":
             off = offer or b.offer()[0]
             tail = f" {off} is available this month." if off else ""
