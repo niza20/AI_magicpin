@@ -80,3 +80,9 @@ def test_festival_leads_with_merchants_own_numbers_and_active_offer():
 def test_match_night_uses_listing_numbers_and_real_weekday():
     b = compose(*_ctx("trg_010_ipl_match_delhi"))["body"]
     assert "2,200 views" in b and "Sunday" in b and "delivery late" not in b
+
+
+def test_research_digest_ties_to_visible_listing_numbers_not_hidden_aggregates():
+    b = compose(*_ctx("trg_029_research_digest_m_050_bharti_pharmac"))["body"]
+    assert "895 views" in b and "6 calls" in b
+    assert "1,535" not in b and "88%" not in b, "customer_aggregate / second-paragraph stats aren't visible to the judge"

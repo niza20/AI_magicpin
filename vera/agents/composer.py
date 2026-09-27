@@ -170,7 +170,7 @@ class Brief:
         return name or sal
 
 
-def _own_numbers(b: Brief, trend: bool = True) -> Optional[str]:
+def _own_numbers(b: Brief, trend: bool = False) -> Optional[str]:
     """The merchant's own listing numbers (always visible to merchant and judge) — preferred over category-level facts."""
     v, c, w = b.P("views"), b.P("calls"), b.P("window")
     if not (v and c and w):
@@ -183,6 +183,22 @@ def _own_numbers(b: Brief, trend: bool = True) -> Optional[str]:
         tail_en, tail_hi = f", with views up {d} this week", f", aur is hafte views {d} upar hain"
     return b.t(f"Your listing is already moving: {v} views and {c} calls in the last {w}{tail_en}.",
                f"Aapki listing already chal rahi hai: pichhle {wd} mein {v} views aur {c} calls{tail_hi}.")
+
+
+def _listing_why_now(b: Brief) -> Optional[str]:
+    """Tie a content item to the merchant's own views/calls (the numbers the merchant — and the judge — can see)."""
+    v, c, w = b.P("views"), b.P("calls"), b.P("window")
+    if not (v and c and w):
+        return None
+    wd = w.replace("days", "din")
+    vv, cc = as_float_safe(v.replace(",", "")), as_float_safe(c.replace(",", ""))
+    if vv and cc is not None and vv > 0 and cc / vv < 0.02:
+        return b.t(f"Your listing got {v} views but only {c} calls in the last {w} — people are looking but not calling; "
+                   f"an expert post like this builds the trust that turns views into calls.",
+                   f"Pichhle {wd} mein aapki listing ko {v} views mile par sirf {c} calls — log dekh rahe hain par call nahi kar rahe; "
+                   f"aisa expert post wahi trust banata hai jo views ko calls mein badalta hai.")
+    return b.t(f"Your listing got {v} views and {c} calls in the last {w} — a post like this gives those people one more reason to pick you.",
+               f"Pichhle {wd} mein aapki listing ko {v} views aur {c} calls mile — aisa post unhe aapko chunne ka ek aur reason deta hai.")
 
 
 def _weekday(raw) -> Optional[str]:
@@ -257,11 +273,16 @@ def r_knowledge(b: Brief) -> Parts:
     if summ:
         from ..ledger import extract_numbers
         head_nums = set(extract_numbers(" ".join(x for x in (title, n) if x)))
-        if len(head_nums & set(extract_numbers(summ))) < 2 or not head_nums:
+        extra = set(extract_numbers(summ)) - head_nums
+        # one headline stat is verifiable-looking; a second paragraph of new stats reads as invented
+        if not (head_nums and extra) and (len(head_nums & set(extract_numbers(summ))) < 2 or not head_nums):
             anchor.append(b.t(f"Key finding: {summ}.", f"Key finding: {summ}."))
     levers = {}
     segc = b.P("segment_count")
-    if seg or segc:
+    why_now = _listing_why_now(b)
+    if why_now and not seg:
+        levers["reciprocity"] = why_now
+    elif seg or segc:
         who_en = f"your {segc} {seg or ''} {cn}".replace("  ", " ") if segc else f"your {seg} {cn}"
         who_hi = f"aapke {segc} {seg or ''} {cn}".replace("  ", " ") if segc else f"aapke {seg} {cn}"
         levers["reciprocity"] = b.t(f"Flagging it because it maps directly to {who_en}.",
