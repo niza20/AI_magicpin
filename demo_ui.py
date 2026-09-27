@@ -46,34 +46,58 @@ LANGS = {"auto": None, "en": "en", "hi-en": "hi-en", "hi": "hi"}
 QUALIFYING = ["would you", "do you", "can you tell", "what if", "how about"]
 
 
-# Restaurant dish photos (Unsplash, loaded by the viewer's browser; the UI falls back to a styled card on error)
-_U = "https://images.unsplash.com/photo-{}?auto=format&fit=crop&w=720&q=70"
-DISHES = [  # (keywords matched against merchant name + offers, photo id, label)
-    (("pizza",), "1513104890138-7c749659a591", "Wood-fired pizza"),
-    (("thali",), "1585937421612-70a008356fbe", "Lunch thali"),
-    (("south indian", "madras", "dosa", "idli", "mylari"), "1589301760014-d929f3979dbc", "Masala dosa"),
-    (("chai", "tea", "cafe", "café"), "1571934811356-5cc061b6821f", "Masala chai"),
-    (("kabab", "kebab", "tandoor", "tikka", "grill"), "1599487488170-d11ec9c172f0", "Tandoori platter"),
-    (("biryani",), "1563379091339-03b21ab4a4f8", "Biryani"),
-    (("burger",), "1568901346375-23c9450c58cd", "Burger"),
-]
-_DEFAULT_DISH = ("1504674900247-0877df9cc836", "Chef's special")
-_NO_PHOTO_FAMILIES = {"account", "regulation", "supply", "knowledge"}
+# Category photos. Order of sources per photo: your own file in demo_assets/photos/<key>.jpg (always right) →
+# a Flickr photo tagged with the subject (loremflickr) → a styled card with the label (if the image can't load).
+_ASSETS = _ROOT / "demo_assets" / "photos"
+PHOTOS = {  # key: (label, flickr tags)
+    "south_indian": ("South Indian thali", "thali"), "dosa": ("Masala dosa", "dosa"), "pizza": ("Pizza", "pizza"),
+    "chai": ("Masala chai", "chai"), "kebab": ("Kebab platter", "kebab"), "tandoori": ("Tandoori platter", "tandoori"),
+    "biryani": ("Biryani", "biryani"), "burger": ("Burger", "burger"), "restaurant": ("Chef's special", "indianfood"),
+    "dental": ("Dental care", "dentist"), "haircut": ("Haircut & styling", "haircut"), "spa": ("Spa & facial", "spa"),
+    "salon": ("Salon", "hairsalon"), "yoga": ("Yoga class", "yoga"), "gym": ("Strength training", "gym"),
+    "pharmacy": ("Your pharmacy", "pharmacy"),
+}
+RULES = {  # category → ordered (keywords, photo key); first match on merchant name + offers + message wins
+    "restaurants": [(("south indian", "mylari", "madras", "thali"), "south_indian"), (("dosa", "idli"), "dosa"),
+                    (("pizza",), "pizza"), (("chai", "tea", "cafe", "café"), "chai"), (("kabab", "kebab"), "kebab"),
+                    (("tandoor", "tikka"), "tandoori"), (("biryani",), "biryani"), (("burger",), "burger"), ((), "restaurant")],
+    "dentists": [((), "dental")],
+    "salons": [(("spa", "facial", "massage"), "spa"), (("hair", "cut", "balayage", "colour", "color"), "haircut"), ((), "salon")],
+    "gyms": [(("yoga",), "yoga"), ((), "gym")],
+    "pharmacies": [((), "pharmacy")],
+}
+_NO_PHOTO_FAMILIES = {"account", "regulation", "supply"}
+
+
+def _photo_srcs(key: str, w: int) -> list[str]:
+    label, tags = PHOTOS[key]
+    srcs = [f"/demo/assets/{f.name}" for f in sorted(_ASSETS.glob(f"{key}.*"))] if _ASSETS.exists() else []
+    h = w * 5 // 9 if w > 200 else w
+    lock = sum(map(ord, key)) % 50 + 1        # stable photo per subject
+    return srcs + [f"https://loremflickr.com/{w}/{h}/{tags}?lock={lock}"]
 
 
 def _dish(m: dict, text: str = "") -> Optional[dict]:
-    """A dish photo for restaurant merchants, matched to what they actually serve."""
-    if (m or {}).get("category_slug") != "restaurants":
+    """A subject-matched photo for the merchant's category (named _dish for history; covers all categories)."""
+    rules = RULES.get((m or {}).get("category_slug"))
+    if not rules:
         return None
     offers = " ".join(str(o.get("title", "")) for o in m.get("offers", []) if isinstance(o, dict))
-    hay = f"{text} {m.get('identity', {}).get('name', '')} {offers}".lower()
-    pid, label = _DEFAULT_DISH
-    for keys, p, lab in DISHES:
-        if any(k in hay for k in keys):
-            pid, label = p, lab
-            break
-    return {"url": _U.format(pid), "thumb": _U.format(pid).replace("w=720", "w=96"), "label": label,
-            "caption": "Sample photo — Vera uses your own dish photos when you share them"}
+    hay = f"{m.get('identity', {}).get('name', '')} {offers} {text}".lower()
+    key = next(k for keys, k in rules if not keys or any(w in hay for w in keys))
+    srcs = _photo_srcs(key, 720)
+    return {"url": srcs[0], "srcs": srcs, "thumb": _photo_srcs(key, 96)[0], "thumbs": _photo_srcs(key, 96),
+            "label": PHOTOS[key][0], "key": key,
+            "caption": "Sample photo — Vera uses your own photos when you share them"}
+
+
+@router.get("/demo/assets/{name}")
+def asset(name: str):
+    from fastapi.responses import FileResponse
+    f = (_ASSETS / name).resolve()
+    if f.parent != _ASSETS.resolve() or not f.is_file() or f.suffix.lower() not in (".jpg", ".jpeg", ".png", ".webp"):
+        return JSONResponse(status_code=404, content={"error": "not found"})
+    return FileResponse(f, headers={"Cache-Control": "public, max-age=86400"})
 
 
 def _dataset():
@@ -141,7 +165,7 @@ def scenarios():
                     "to": (c or {}).get("identity", {}).get("name") if c else m["identity"].get("owner_first_name"),
                     "languages": m["identity"].get("languages"),
                     "customer_lang": (c or {}).get("identity", {}).get("language_pref") if c else None,
-                    "thumb": (_dish(m) or {}).get("thumb")})
+                    "thumb": (_dish(m) or {}).get("thumb"), "thumbs": (_dish(m) or {}).get("thumbs")})
     order = ["Knowledge & curiosity", "Performance & account", "Market & local events", "Engagement & merchant intent",
              "Customer-facing (sent on the merchant's behalf)"]
     out.sort(key=lambda x: (order.index(x["group"]) if x["group"] in order else 9, x["id"]))
@@ -232,7 +256,8 @@ def _with_ui(st: ConversationState, r: dict) -> dict:
         if st.attachments:
             r["draft_image"] = st.attachments[-1]
         elif _dish(st.merchant):
-            r["draft_image"] = _dish(st.merchant, body)["url"]
+            d = _dish(st.merchant, body)
+            r["draft_image"], r["draft_srcs"] = d["url"], d["srcs"]
     return r
 
 
@@ -450,7 +475,7 @@ select{background:var(--panel);color:var(--ink);border:1px solid var(--line);bor
 .v{background:var(--them)}.u{background:var(--me);margin-left:auto}
 .tm{display:block;text-align:right;color:var(--muted);font-size:11px;padding:0 9px 5px}
 .bt{border-top:1px solid var(--line);display:flex}.bt button{flex:1;border:0;background:transparent;color:var(--btn);padding:9px;cursor:pointer;font-weight:600;font-size:14px}.bt button+button{border-left:1px solid var(--line)}.bt button:disabled{color:var(--muted);cursor:default}
-.ph{margin:4px 4px 0;border-radius:6px;overflow:hidden;position:relative;max-width:380px}.ph img{display:block;width:100%;height:190px;object-fit:cover}.ph figcaption{font-size:11px;color:var(--muted);padding:4px 6px 0}.ph .lab{position:absolute;left:8px;top:8px;background:rgba(0,0,0,.55);color:#fff;font-size:12px;padding:2px 8px;border-radius:10px}.ph .fb{height:190px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:18px;background:linear-gradient(135deg,#e2725b,#f2b544)}.ra.pic{background-size:cover;background-position:center}
+.ph{margin:4px 4px 0;border-radius:6px;overflow:hidden;position:relative;max-width:380px}.ph img{display:block;width:100%;height:190px;object-fit:cover}.ph figcaption{font-size:11px;color:var(--muted);padding:4px 6px 0}.ph .lab{position:absolute;left:8px;top:8px;background:rgba(0,0,0,.55);color:#fff;font-size:12px;padding:2px 8px;border-radius:10px}.ph .fb{height:190px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:18px;background:linear-gradient(135deg,#e2725b,#f2b544)}.ra{position:relative;overflow:hidden}.ra img.av{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
 .post{max-width:380px;margin:4px 10px 8px;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--panel)}.post img{display:block;width:100%;max-height:190px;object-fit:cover}.post .pl{font-size:11px;color:var(--muted);padding:6px 10px 0;text-transform:uppercase;letter-spacing:.05em}.post .pt{padding:4px 10px 9px;font-size:14px}
 .u img{display:block;max-width:260px;border-radius:6px;margin:4px}
 .why{border:0;background:none;color:var(--muted);font-size:11px;cursor:pointer;padding:0 9px 5px}.why:hover{color:var(--accent)}
@@ -513,12 +538,16 @@ function hl(text,spans){const t=String(text),taken=new Array(t.length).fill(fals
   if(ok){for(let k=i;k<i+s.text.length;k++)taken[k]=true;m.push([i,i+s.text.length,s]);break}i=t.indexOf(s.text,i+1)}});
  m.sort((a,b)=>a[0]-b[0]);let o='',p=0;m.forEach(([a,b,s])=>{o+=esc(t.slice(p,a))+`<mark class="${s.layer}" title="${esc(s.source)}">${esc(t.slice(a,b))}</mark>`;p=b});return o+esc(t.slice(p))}
 
-function imgFail(el,label){const f=document.createElement('div');f.className='fb';f.textContent=label||'Chef\'s special';const l=el.parentNode&&el.parentNode.querySelector('.lab');if(l)l.remove();el.replaceWith(f)}
-function fig(m){return m&&m.url?`<figure class="ph"><img src="${esc(m.url)}" alt="${esc(m.label)}" loading="lazy" onerror="imgFail(this,'${esc(m.label).replace(/'/g,'')}')"><span class="lab">${esc(m.label)}</span><figcaption>${esc(m.caption||'')}</figcaption></figure>`:''}
+function imgFail(el,label){const alt=JSON.parse(el.dataset.srcs||'[]');const i=+(el.dataset.i||0)+1;
+ if(i<alt.length){el.dataset.i=i;el.src=alt[i];return}
+ if(!label){el.remove();return}
+ const f=document.createElement('div');f.className='fb';f.textContent=label;const l=el.parentNode&&el.parentNode.querySelector('.lab');if(l)l.remove();el.replaceWith(f)}
+const srcAttr=(srcs,url)=>`src="${esc((srcs&&srcs[0])||url)}" data-srcs="${esc(JSON.stringify(srcs||[url]))}"`;
+function fig(m){return m&&m.url?`<figure class="ph"><img ${srcAttr(m.srcs,m.url)} alt="${esc(m.label)}" loading="lazy" onerror="imgFail(this,'${esc(m.label).replace(/'/g,'')}')"><span class="lab">${esc(m.label)}</span><figcaption>${esc(m.caption||'')}</figcaption></figure>`:''}
 function vera(r,{spans=null,first=false}={}){const body=r.body||'';const [pre,draft]=body.split(/Draft post ↓\n|draft post ↓\n/);
  let main=pre,rest='';if(draft!==undefined){const i=draft.lastIndexOf('\n');rest=i>=0?draft.slice(i+1):'';main=pre}
  let h=(draft===undefined?fig(r.media):'')+`<div class="t">${spans?hl(main,spans):esc(main)}</div>`;
- if(draft!==undefined){const txt=draft.split('\n').slice(0,-1).join('\n')||draft;h+=`<div class="post">${r.draft_image?`<img src="${esc(r.draft_image)}" alt="dish photo" onerror="this.remove()">`:''}<div class="pl">📍 Google post preview</div><div class="pt">${esc(txt)}</div></div>`+(rest?`<div class="t">${esc(rest)}</div>`:'')}
+ if(draft!==undefined){const txt=draft.split('\n').slice(0,-1).join('\n')||draft;h+=`<div class="post">${r.draft_image?`<img ${srcAttr(r.draft_srcs,r.draft_image)} alt="photo" onerror="imgFail(this,'')">`:''}<div class="pl">📍 Google post preview</div><div class="pt">${esc(txt)}</div></div>`+(rest?`<div class="t">${esc(rest)}</div>`:'')}
  h+=`<span class="tm">${now()}</span>`;if(first)h+=`<button class="why" onclick="drawer(true);return false">ⓘ How Vera wrote this</button>`;
  if(r.buttons&&r.buttons.length)h+=`<div class="bt">${r.buttons.map(b=>`<button type="button">${esc(b)}</button>`).join('')}</div>`;
  const d=document.createElement('div');d.className='b v';d.innerHTML=h;$('#log').appendChild(d);
@@ -533,7 +562,7 @@ function side(){const el=$('#side'),pk=$('#pick');let h='',opts='<option value="
  if(MODE==='chat'){h+=`<div class="search"><input id="q" placeholder="🔍 Search merchants or triggers"></div><div id="rows"></div>`;el.innerHTML=h;
   const draw=()=>{const q=($('#q').value||'').toLowerCase();let r='',g='';SC.filter(x=>(x.merchant+x.kind+x.category+x.id+(x.to||'')).toLowerCase().includes(q)).forEach(x=>{
    if(x.group!==g){g=x.group;r+=`<div class="gh">${esc(g)}</div>`}
-   r+=`<div class="row${cur&&cur.id===x.id?' on':''}" data-id="${x.id}">${x.thumb?`<div class="ra pic" style="background-color:${color(x.merchant)};background-image:url('${esc(x.thumb)}')"></div>`:`<div class="ra" style="background:${color(x.merchant)}">${ini(x.merchant)}</div>`}<div class="tx"><b>${esc(x.merchant)}</b><span>${x.audience==='customer'?'👤 to '+esc(x.to)+' · ':''}${esc(x.kind)} · ${esc(x.category)}</span></div></div>`});
+   r+=`<div class="row${cur&&cur.id===x.id?' on':''}" data-id="${x.id}"><div class="ra" style="background:${color(x.merchant)}">${ini(x.merchant)}${x.thumb?`<img class="av" ${srcAttr(x.thumbs,x.thumb)} alt="" loading="lazy" onerror="imgFail(this,'')">`:''}</div><div class="tx"><b>${esc(x.merchant)}</b><span>${x.audience==='customer'?'👤 to '+esc(x.to)+' · ':''}${esc(x.kind)} · ${esc(x.category)}</span></div></div>`});
    $('#rows').innerHTML=r;document.querySelectorAll('.row').forEach(n=>n.onclick=()=>start(SC.find(x=>x.id===n.dataset.id)))};
   $('#q').oninput=draw;draw();SC.forEach(x=>opts+=`<option value="${x.id}">${x.id} · ${esc(x.merchant)} — ${esc(x.kind)}</option>`)}
  else if(MODE==='tests'){h='<div class="gh">What the judge runs</div>'+TESTS.map(t=>`<div class="row" data-t="${t[0]}"><div class="ra" style="background:${color(t[1])}">🧪</div><div class="tx"><b>${t[1]}</b><span>${t[2]}</span></div><span class="pass" id="res_${t[0]}"></span></div>`).join('');

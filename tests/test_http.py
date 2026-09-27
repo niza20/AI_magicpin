@@ -131,12 +131,24 @@ def test_demo_photo_and_deals_flow():
     assert c.post("/demo/api/deals", json={"session_id": s2["session_id"]}).json()["action"] == "end"
 
 
-def test_demo_restaurant_dish_photos():
+def test_demo_category_photos_and_local_override(tmp_path):
     import os
+    import demo_ui
     if not os.path.exists(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "dataset", "expanded")):
         pytest.skip("official dataset not expanded")
     c = TestClient(bot.app)
     sc = {x["merchant"]: x for x in c.get("/demo/api/scenarios").json()}
-    assert sc["SK Pizza Junction"]["thumb"] and not sc["Dr. Meera's Dental Clinic"]["thumb"], "photos only for restaurants"
-    s = c.post("/demo/api/start", json={"trigger_id": sc["SK Pizza Junction"]["trigger_id"]}).json()
-    assert s["media"]["label"] == "Wood-fired pizza" and s["media"]["url"].startswith("https://images.unsplash.com/")
+    s = c.post("/demo/api/start", json={"trigger_id": sc["Mylari South Indian Cafe"]["trigger_id"]}).json()
+    assert s["media"]["label"] == "South Indian thali" and "thali" in s["media"]["url"]
+    assert sc["Dr. Meera's Dental Clinic"]["thumb"], "every category gets a photo now"
+    # a local file in demo_assets/photos/<key>.jpg wins over the online sample and is served safely
+    old = demo_ui._ASSETS
+    demo_ui._ASSETS = tmp_path
+    try:
+        (tmp_path / "pizza.jpg").write_bytes(b"\xff\xd8\xff fake jpg")
+        s = c.post("/demo/api/start", json={"trigger_id": sc["SK Pizza Junction"]["trigger_id"]}).json()
+        assert s["media"]["srcs"][0] == "/demo/assets/pizza.jpg" and len(s["media"]["srcs"]) == 2
+        assert c.get("/demo/assets/pizza.jpg").status_code == 200
+        assert c.get("/demo/assets/..%2Fbot.py").status_code == 404
+    finally:
+        demo_ui._ASSETS = old
