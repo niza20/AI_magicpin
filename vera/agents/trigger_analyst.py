@@ -79,6 +79,8 @@ def classify_family(kind: str, scope: str) -> str:
         if any(key in k for key in keys):
             if scope == "customer" and not fam.startswith("customer_"):
                 continue
+            if scope != "customer" and fam.startswith("customer_"):
+                continue      # e.g. merchant-scope "winback_eligible" is about the merchant's own plan
             return fam
     return "customer_recall" if scope == "customer" else "generic"
 

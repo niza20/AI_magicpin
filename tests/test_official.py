@@ -60,3 +60,23 @@ def test_chronic_refill_hindi_senior():
 def test_dataset_suppression_keys_kept_when_merchant_scoped():
     tid = next(p["trigger_id"] for p in PAIRS if p["test_id"] == "T24")
     assert compose(*_ctx(tid))["suppression_key"] == DS.triggers[tid]["suppression_key"]
+
+
+# ---- real judge feedback (judge only sees identity, performance, signals, active offers, trigger payload) ----
+def test_merchant_winback_is_about_the_plan_not_a_customer_recall():
+    r = compose(*_ctx("trg_009_winback_glamour"))
+    b = r["body"]
+    assert r["send_as"] == "vera" and "Anjali" in b and "38" in b and "24" in b and "30%" in b
+    assert "calls 30%" in b, "payload perf_dip_pct matches calls_pct, not views"
+    assert "last visit" not in b.lower()
+
+
+def test_festival_leads_with_merchants_own_numbers_and_active_offer():
+    b = compose(*_ctx("trg_006_festival_diwali"))["body"]
+    assert "4,980 views" in b and "62 calls" in b
+    assert "Bridal Trial" not in b and "4x" not in b, "category-only facts look fabricated to the judge"
+
+
+def test_match_night_uses_listing_numbers_and_real_weekday():
+    b = compose(*_ctx("trg_010_ipl_match_delhi"))["body"]
+    assert "2,200 views" in b and "Sunday" in b and "delivery late" not in b

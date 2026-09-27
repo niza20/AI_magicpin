@@ -170,6 +170,29 @@ class Brief:
         return name or sal
 
 
+def _own_numbers(b: Brief, trend: bool = True) -> Optional[str]:
+    """The merchant's own listing numbers (always visible to merchant and judge) — preferred over category-level facts."""
+    v, c, w = b.P("views"), b.P("calls"), b.P("window")
+    if not (v and c and w):
+        return None
+    wd = w.replace("days", "din")
+    up = b.pz.get("views_delta", {}).get("signed")
+    tail_en = tail_hi = ""
+    if trend and isinstance(up, (int, float)) and up > 0:
+        d = b.P("views_delta")
+        tail_en, tail_hi = f", with views up {d} this week", f", aur is hafte views {d} upar hain"
+    return b.t(f"Your listing is already moving: {v} views and {c} calls in the last {w}{tail_en}.",
+               f"Aapki listing already chal rahi hai: pichhle {wd} mein {v} views aur {c} calls{tail_hi}.")
+
+
+def _weekday(raw) -> Optional[str]:
+    try:
+        from datetime import date as _d
+        return _d.fromisoformat(str(raw)[:10]).strftime("%A")
+    except (ValueError, TypeError):
+        return None
+
+
 def _q(s: Optional[str]) -> str:
     return f"“{s.strip().rstrip('.')}”" if s else ""
 
@@ -504,7 +527,8 @@ def r_festival(b: Brief) -> Parts:
         else:
             hook = b.t(f"{b.sal()}, {name} is coming up" + (f" on {date}." if date else "."),
                        f"{b.sal()}, {name} aa raha hai" + (f" — {date}." if date else "."))
-        anchor = [b.t(f"Seasonal pattern for your category: {beat}.", f"Aapki category ka seasonal pattern: {beat}.")] if beat else []
+        own = _own_numbers(b)
+        anchor = [own] if own else ([b.t(f"Seasonal pattern for your category: {beat}.", f"Aapki category ka seasonal pattern: {beat}.")] if beat else [])
         far = bool(days and (as_float_safe(b.Araw("days_until")) or 0) > 45)
         if far:
             levers_note = b.t(f"Packages fixed early get booked first; last-minute ones compete on price.",
@@ -524,7 +548,7 @@ def r_festival(b: Brief) -> Parts:
         return Parts(hook, anchor, levers, ctas)
     o_en, o_hi = b.offer_phrase()
     match = b.offer_matching(beat or "")
-    if match:
+    if match and (match[1] == "active" or b.offer()[1] != "active"):   # merchant's own live offer beats a catalog idea
         o_en, o_hi = (f"your {match[0]} offer", f"aapke {match[0]} offer") if match[1] == "active" else (f"a '{match[0]}' offer", f"'{match[0]}' jaise offer")
     ctas = _post_cta(b, f"draft a {name} package post built on {o_en}" if o_en else f"draft a {name} package post for you",
                      f"{o_hi} pe based {name} package post draft kar doon" if o_hi else f"aapke liye {name} package post draft kar doon")
@@ -577,11 +601,18 @@ def r_local_event(b: Brief) -> Parts:
     levers = {}
     if is_match:
         wk = b.Araw("_weeknight")
-        levers["loss_aversion"] = b.t(("It's a weekend match, so " if wk is False else "") + f"{cn} will be ordering in or looking for a place to watch — the listing that posts first gets seen.",
-                                      ("Weekend match hai, toh " if wk is False else "") + f"{cn} order karenge ya match dekhne ki jagah dhoondhenge — jo pehle post karta hai wahi dikhta hai.")
-        if b.P("complaint"):
+        wd = _weekday(b.Araw("date"))
+        levers["loss_aversion"] = b.t((f"It's a {wd} match, so " if wk is False and wd else "It's a weekend match, so " if wk is False else "") + f"{cn} will be ordering in or looking for a place to watch — the listing that posts first gets seen.",
+                                      (f"{wd} ka match hai, toh " if wk is False and wd else "Weekend match hai, toh " if wk is False else "") + f"{cn} order karenge ya match dekhne ki jagah dhoondhenge — jo pehle post karta hai wahi dikhta hai.")
+        own = _own_numbers(b, trend=False)
+        if own:
+            levers["specificity"] = own
+        elif b.P("complaint"):
             levers["specificity"] = b.t(f"One watch-out: recent reviews mention {b.P('complaint')} — worth staffing up for the rush.",
                                         f"Ek dhyaan dene wali baat: recent reviews mein {b.P('complaint')} ka zikr hai — rush ke liye staff ready rakhein.")
+        if "trial_ending_soon" in (b.tools.get_merchant_fact("signals") or []):
+            levers["reciprocity"] = b.t("Your trial ends soon — a match night is the best week to see what the listing can do.",
+                                        "Aapka trial khatam hone wala hai — match night yeh dekhne ka best mauka hai ki listing kya kar sakti hai.")
         ctas = _post_cta(b, "put up a match-night post before the first ball", "pehli ball se pehle ek match-night post laga doon")
     else:
         levers["loss_aversion"] = b.t(f"{cn.capitalize()} planning to visit may get caught out — a quick update keeps them coming.",
@@ -669,6 +700,16 @@ def r_recurring(b: Brief) -> Parts:
     return parts
 
 
+def _dip_metric(b: Brief) -> str:
+    dip = as_float_safe(b.Araw("dip"))
+    for m in ("calls", "views", "ctr"):
+        d = b.pz.get(f"{m}_delta", {}).get("signed")
+        if dip is not None and isinstance(d, (int, float)) and abs(abs(d) - abs(dip)) < 0.005:
+            b.P(f"{m}_delta")
+            return m
+    return "listing results"
+
+
 def r_account(b: Brief) -> Parts:
     plan, days, date, amt = b.A("plan"), b.A("days_left"), b.A("date"), b.A("amount")
     exp_days, dip, lapsed = b.A("expired_days"), b.A("dip"), b.A("lapsed_new")
@@ -676,8 +717,9 @@ def r_account(b: Brief) -> Parts:
     if exp_days:
         hook = b.t(f"{b.sal()}, your magicpin {plan + ' ' if plan else ''}plan lapsed {exp_days} days ago.",
                    f"{b.sal()}, aapka magicpin {plan + ' ' if plan else ''}plan {exp_days} din pehle band ho gaya.")
-        bits_en = [x for x in (f"views are down {dip}" if dip else None, f"{lapsed} more customers have lapsed" if lapsed else None) if x]
-        bits_hi = [x for x in (f"views {dip} neeche hain" if dip else None, f"{lapsed} aur customers lapse ho gaye" if lapsed else None) if x]
+        dm = _dip_metric(b)
+        bits_en = [x for x in (f"{dm} are down {dip}" if dip else None, f"{lapsed} more customers have lapsed" if lapsed else None) if x]
+        bits_hi = [x for x in (f"{dm} {dip} neeche hain" if dip else None, f"{lapsed} aur customers lapse ho gaye" if lapsed else None) if x]
         if bits_en:
             anchor.append(b.t("Since then, " + " and ".join(bits_en) + ".", "Tab se " + " aur ".join(bits_hi) + "."))
     else:

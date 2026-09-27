@@ -8,6 +8,7 @@ zero-fabrication with the Fact Checker, and replays the judge's multi-turn scena
 from __future__ import annotations
 
 import argparse
+import os
 import statistics
 import sys
 
@@ -30,7 +31,7 @@ QUALIFYING = ["would you", "do you", "can you tell", "what if", "how about"]
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--dataset", default="dataset")
+    ap.add_argument("--dataset", default="dataset/expanded" if os.path.isdir("dataset/expanded") else "dataset")
     ap.add_argument("--pairs", default=None)
     ap.add_argument("--show", action="store_true")
     args = ap.parse_args()

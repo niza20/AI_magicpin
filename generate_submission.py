@@ -21,7 +21,7 @@ from vera.dataset import find_test_pairs, load_dataset, load_pairs
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--dataset", default="dataset")
+    ap.add_argument("--dataset", default="dataset/expanded" if os.path.isdir("dataset/expanded") else "dataset")
     ap.add_argument("--pairs", default=None)
     ap.add_argument("--out", default="submission.jsonl")
     args = ap.parse_args()
@@ -52,6 +52,11 @@ def main() -> int:
         if errs or dt > 30:
             problems.append(f"{p['test_id']}: {errs or ''} {dt:.1f}s")
         rows.append({"test_id": p["test_id"], **out})
+    if len(rows) < len(pairs):
+        for pr in problems:
+            print("PROBLEM:", pr, file=sys.stderr)
+        print(f"ERROR: only {len(rows)}/{len(pairs)} pairs composed — not overwriting {args.out}.", file=sys.stderr)
+        return 1
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     with open(args.out, "w", encoding="utf-8") as f:
         for r in rows:
