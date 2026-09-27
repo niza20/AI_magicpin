@@ -227,3 +227,30 @@ def test_demo_chats_are_saved_listed_restored_and_private(tmp_path):
     assert c.get("/demo/api/chats", params={"owner": me}).json() == []
     # the judge API never touches the demo database
     assert c.post("/v1/teardown").json()["ok"]
+
+
+def test_browser_copy_is_reimported_after_server_lost_its_disk(tmp_path):
+    import os
+    import demo_store
+    import demo_ui
+    if not os.path.exists(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "dataset", "expanded")):
+        pytest.skip("official dataset not expanded")
+    demo_store.reset_for_tests(str(tmp_path / "a.db"))
+    c = TestClient(bot.app)
+    me = "owner_cccccccc3"
+    sc = next(x for x in c.get("/demo/api/scenarios").json() if x["merchant"].startswith("Mylari"))
+    s = c.post("/demo/api/start", json={"trigger_id": sc["trigger_id"], "owner": me}).json()
+    r1 = c.post("/demo/api/reply", json={"session_id": s["session_id"], "message": "Yes, go ahead", "owner": me}).json()
+    local = {"id": s["session_id"], "title": s["ui"]["title"], "subtitle": s["ui"]["subtitle"], "start": s["start_spec"],
+             "log": [{"role": "vera", "r": s, "ts": 1}, {"role": "me", "text": "Yes, go ahead", "ts": 2}, {"role": "vera", "r": r1, "ts": 3}]}
+    demo_store.reset_for_tests(str(tmp_path / "b.db"))          # disk wiped + restart
+    demo_ui._sessions.clear()
+    assert c.get(f"/demo/api/chats/{s['session_id']}", params={"owner": me}).status_code == 404
+    assert c.post("/demo/api/chats/import", json={**local, "owner": me}).json()["imported"]
+    assert c.get("/demo/api/chats", params={"owner": me}).json()[0]["id"] == s["session_id"]
+    r = c.post("/demo/api/reply", json={"session_id": s["session_id"], "message": "GO", "owner": me}).json()
+    assert r["body"].startswith(("Sent", "Bhej diya"))
+    # someone else can't hijack or overwrite it; junk is rejected
+    assert not c.post("/demo/api/chats/import", json={**local, "owner": "owner_dddddddd4"}).json()["imported"]
+    assert c.post("/demo/api/chats/import", json={**local, "id": "../x", "owner": me}).status_code == 400
+    assert c.post("/demo/api/chats/import", json={**local, "start": {"type": "evil"}, "id": "abcdef012345", "owner": me}).status_code == 400

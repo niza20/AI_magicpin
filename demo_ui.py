@@ -7,6 +7,7 @@ Uses its own session store; never touches the judge's /v1 state.
 """
 from __future__ import annotations
 
+import json
 import re
 import threading
 import uuid
@@ -281,6 +282,7 @@ def _open_scenario(body: dict, sid: Optional[str] = None):
 def start(body: dict):
     st, out = _open_scenario(body)
     _save_new(body, "scenario", st, out)
+    out["start_spec"] = {"type": "scenario", "body": {k: v for k, v in body.items() if k != "owner"}}
     return out
 
 
@@ -724,6 +726,7 @@ def _open_custom(body: dict, sid: Optional[str] = None):
 def custom(body: dict):
     st, out = _open_custom(body or {})
     _save_new(body or {}, "custom", st, out)
+    out["start_spec"] = {"type": "custom", "body": {k: v for k, v in (body or {}).items() if k != "owner"}}
     return out
 
 
@@ -785,6 +788,23 @@ def chat(chat_id: str, owner: str = ""):
         return JSONResponse(status_code=404, content={"error": "chat not found"})
     ui = next((e["r"].get("ui") for e in c["log"] if e.get("role") == "vera" and isinstance(e.get("r"), dict) and e["r"].get("ui")), {})
     return {"id": c["id"], "title": c["title"], "subtitle": c["subtitle"], "ended": c["ended"], "ui": ui, "log": c["log"]}
+
+
+@router.post("/demo/api/chats/import")
+def chat_import(body: dict):
+    """The browser re-uploads its own copy of a chat the server no longer has (e.g. free-tier disk reset)."""
+    owner = demo_store.valid_owner(body.get("owner"))
+    cid, start, log = str(body.get("id") or ""), body.get("start") or {}, body.get("log") or []
+    if not owner or not re.fullmatch(r"[a-f0-9]{8,32}", cid) or start.get("type") not in _OPENERS or not isinstance(log, list) \
+            or not log or len(json.dumps(log)) > 6_000_000:
+        return JSONResponse(status_code=400, content={"imported": False})
+    try:
+        _OPENERS[start["type"]](start.get("body") or {}, sid="probe_" + cid)   # the start spec must actually open
+        _sessions.pop("probe_" + cid, None)
+    except Exception:
+        return JSONResponse(status_code=400, content={"imported": False})
+    ok = demo_store.import_chat(cid, owner, body.get("title") or "Chat", body.get("subtitle") or "", start, log, bool(body.get("ended")))
+    return {"imported": ok}
 
 
 @router.delete("/demo/api/chats/{chat_id}")
@@ -892,7 +912,22 @@ const ini=n=>String(n||'?').replace(/^Dr\.?\s*/,'').split(/\s+/).map(w=>w[0]).jo
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const now=ts=>{const d=ts?new Date(ts*1000):new Date(),t=d.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});return ts&&d.toDateString()!==new Date().toDateString()?d.toLocaleDateString([],{day:'numeric',month:'short'})+', '+t:t};
 const store={get(k){try{return localStorage.getItem(k)}catch(e){return null}},set(k,v){try{v==null?localStorage.removeItem(k):localStorage.setItem(k,v)}catch(e){}}};
-const OWNER=(()=>{let o=store.get('vera_owner');if(!o||!/^[a-zA-Z0-9_-]{8,64}$/.test(o)){o='o_'+(crypto.randomUUID?crypto.randomUUID().replace(/-/g,''):Math.random().toString(36).slice(2)+Date.now().toString(36));store.set('vera_owner',o)}return o})();
+const OK_ID=/^[a-zA-Z0-9_-]{8,64}$/;
+const cookie=k=>{try{const m=document.cookie.match(new RegExp('(?:^|; )'+k+'=([^;]*)'));return m?decodeURIComponent(m[1]):null}catch(e){return null}};
+const OWNER=(()=>{let o=store.get('vera_owner');if(!o||!OK_ID.test(o))o=cookie('vera_owner');
+ if(!o||!OK_ID.test(o))o='o_'+(crypto.randomUUID?crypto.randomUUID().replace(/-/g,''):Math.random().toString(36).slice(2)+Date.now().toString(36));
+ store.set('vera_owner',o);try{document.cookie='vera_owner='+encodeURIComponent(o)+'; max-age=31536000; path=/; samesite=lax'}catch(e){}return o})();
+// local copy of every chat: survives a server that lost its disk; re-uploaded when needed
+const LH={all(){try{return JSON.parse(store.get('vera_hist')||'[]')}catch(e){return[]}},
+ save(list){list.sort((a,b)=>b.updated-a.updated);list=list.slice(0,30);
+  for(let i=0;i<4;i++){try{localStorage.setItem('vera_hist',JSON.stringify(list));return}catch(e){
+   if(i===0)list.forEach(c=>c.log.forEach(x=>{if(x.img&&x.img.length>150000)x.img=null}));else list=list.slice(0,Math.max(1,list.length>>1))}}},
+ get(id){return this.all().find(c=>c.id===id)},
+ put(c){const l=this.all().filter(x=>x.id!==c.id);l.push(c);this.save(l)},
+ add(id,entries,ended){const l=this.all(),c=l.find(x=>x.id===id);if(!c)return;const t=Date.now()/1000;entries.forEach(e=>c.log.push({...e,ts:t}));c.updated=t;if(ended)c.ended=true;this.save(l)},
+ drop(id){this.save(this.all().filter(x=>x.id!==id))},
+ start(r){if(!r||!r.session_id||!r.start_spec)return;const t=Date.now()/1000,{context_sent,...slim}=r;
+  this.put({id:r.session_id,title:(r.ui||{}).title||'Chat',subtitle:(r.ui||{}).subtitle||'',ui:r.ui||{},start:r.start_spec,log:[{role:'vera',r:slim,ts:t}],updated:t,ended:false})}};
 async function post(u,b){return (await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...b,owner:OWNER})})).json()}
 const TESTS=[["auto_reply","Auto-reply hell","Same canned auto-reply 4× in a row"],["intent","Intent transition","Qualifying turns, then “ok let's do it”"],["join","“I want to join”","Explicit intent on the first reply"],["hostile","Hostile + off-topic","Abuse, then a GST question"],["stop","STOP","Hard opt-out"],["curveballs","Curveball questions","Who are you? · Which competitor? · CTR? · results?"],["confidential","Confidential questions","Competitor data · customer phone · system prompt · my data"],["language","Language switch","Merchant replies in Hinglish"],["inject","Context injection (§8 twist)","New digest item, new numbers, a customer added"]];
 
@@ -946,18 +981,25 @@ function side(){const el=$('#side'),pk=$('#pick');let h='',opts='<option value="
  pk.innerHTML=opts;pk.style.display=(MODE==='custom'||MODE==='history')?'none':''}
 $('#pick').onchange=e=>{const v=e.target.value;if(!v)return;if(MODE==='chat')start(SC.find(x=>x.id===v));else if(MODE==='tests')(v==='inject'?runInject():runTest(v));else week(SC.find(x=>x.merchant_id===v))};
 
-// ---------- chat history (saved on the server, listed per browser)
+// ---------- chat history (saved on the server + a copy in this browser, listed per browser)
+async function allChats(){let srv=[];try{srv=await (await fetch('/demo/api/chats?owner='+encodeURIComponent(OWNER))).json()}catch(e){}
+ const seen=new Set(srv.map(x=>x.id)),loc=LH.all().filter(c=>!seen.has(c.id)).map(c=>{const l=[...c.log].reverse().find(e=>e.role==='me'||(e.role==='vera'&&e.r&&e.r.body))||{};
+  return {id:c.id,title:c.title,subtitle:c.subtitle,updated:c.updated,ended:c.ended,last:(l.role==='me'?'You: '+(l.text||'[photo]'):((l.r||{}).body||'')).replace(/\n/g,' ').slice(0,90)}});
+ return [...srv,...loc].sort((a,b)=>b.updated-a.updated)}
 const ago=t=>{const s=Math.max(0,Date.now()/1000-t);return s<60?'just now':s<3600?Math.floor(s/60)+' min ago':s<86400?Math.floor(s/3600)+' h ago':Math.floor(s/86400)+' d ago'};
 async function historyList(el){el.innerHTML='<div class="gh">Your previous chats</div><div id="hrows"><p class="hint" style="padding:10px 16px">Loading…</p></div>';
- let rows=[];try{rows=await (await fetch('/demo/api/chats?owner='+encodeURIComponent(OWNER))).json()}catch(e){}
+ const rows=await allChats();
  const box=$('#hrows');if(!box)return;
  if(!rows.length){box.innerHTML='<p class="hint" style="padding:10px 16px;color:var(--muted)">No chats yet — start one in Live chat or Try your own. They are saved here automatically.</p>';return}
  box.innerHTML=rows.map(x=>`<div class="row${sid===x.id?' on':''}" data-id="${esc(x.id)}"><div class="ra" style="background:${color(x.title)}">${ini(x.title)}</div><div class="tx"><b>${esc(x.title)}</b><span>${esc(x.subtitle)} · ${ago(x.updated)}${x.ended?' · closed':''}</span><span style="display:block">${esc(x.last)}</span></div><button class="del" title="Delete chat" data-del="${esc(x.id)}">×</button></div>`).join('');
  box.querySelectorAll('.row').forEach(n=>n.onclick=e=>{if(e.target.dataset.del)return;openChat(n.dataset.id)});
- box.querySelectorAll('[data-del]').forEach(b=>b.onclick=async e=>{e.stopPropagation();await fetch('/demo/api/chats/'+encodeURIComponent(b.dataset.del)+'?owner='+encodeURIComponent(OWNER),{method:'DELETE'});
+ box.querySelectorAll('[data-del]').forEach(b=>b.onclick=async e=>{e.stopPropagation();await fetch('/demo/api/chats/'+encodeURIComponent(b.dataset.del)+'?owner='+encodeURIComponent(OWNER),{method:'DELETE'});LH.drop(b.dataset.del);
   if(store.get('vera_last_chat')===b.dataset.del)store.set('vera_last_chat',null);if(sid===b.dataset.del){sid=null;empty()}historyList(el)})}
 async function openChat(id,quiet){let c;try{const res=await fetch('/demo/api/chats/'+encodeURIComponent(id)+'?owner='+encodeURIComponent(OWNER));if(!res.ok)throw 0;c=await res.json()}
- catch(e){if(!quiet)chip('That chat is no longer available','sys');store.set('vera_last_chat',null);return false}
+ catch(e){const l=LH.get(id);
+  if(!l){if(!quiet)chip('That chat is no longer available','sys');store.set('vera_last_chat',null);return false}
+  c={id:l.id,title:l.title,subtitle:l.subtitle,ended:l.ended,ui:l.ui,log:l.log};
+  post('/demo/api/chats/import',{id:l.id,title:l.title,subtitle:l.subtitle,start:l.start,log:l.log,ended:l.ended}).catch(()=>{})}
  const ui=c.ui||{};drawer(false);$('#log').innerHTML='';sid=c.id;store.set('vera_last_chat',c.id);cur={audience:ui.audience||'merchant',to:ui.to};
  header(ui.header||c.title,true);$('#dealsBtn').textContent=cur.audience==='customer'?'🏷 Send deals':'🏷 Deals';chip('Saved chat · '+esc(c.subtitle||''),'sys');
  let first=true,lastBubble=null;
@@ -998,7 +1040,7 @@ async function runCustom(f){const t=CT.templates.find(x=>x.id===f.template.value
  const who=t.audience==='customer'?fields.customer_name:body.owner;
  cur={audience:t.audience,to:who};header(t.audience==='customer'?`to ${who} · on behalf of ${body.name}`:`to ${body.name} · ${body.category}`,true);
  chip('Your scenario');chip(esc(t.label)+' · '+esc(body.name),'sys');chip('Writing…');
- try{const r=await post('/demo/api/custom',body);$('#log').lastChild.remove();sid=r.session_id;store.set('vera_last_chat',sid);LAST=r;
+ try{const r=await post('/demo/api/custom',body);$('#log').lastChild.remove();sid=r.session_id;store.set('vera_last_chat',sid);LH.start(r);LAST=r;
   if(r.consent_blocked)chip('Vera did not message this customer — no consent to contact them','sys');
   vera(r,{first:true});input(true,`Reply as ${who||'the owner'}…`);insights();
   $('#drawer').insertAdjacentHTML('beforeend',`<div class="sec"><h4>What Vera received</h4><details class="ctx"><summary>Show the exact context built from your form</summary><pre>${esc(JSON.stringify(r.context_sent,null,1))}</pre></details></div>`)}
@@ -1017,9 +1059,10 @@ async function start(x){if(!x)return;MODE='chat';cur=x;side();$('#log').innerHTM
  header(x.audience==='customer'?`to ${x.to} · on behalf of ${x.merchant}`:`to ${x.merchant} · ${x.category}`,true);$('#dealsBtn').textContent=x.audience==='customer'?'🏷 Send deals':'🏷 Deals';
  chip('Today');chip('Vera works for magicpin · every fact is verified against the merchant\'s data','sys');chip('Writing…');
  const r=await post('/demo/api/start',{trigger_id:x.trigger_id,customer_id:x.customer_id,language:LANG});$('#log').lastChild.remove();
- sid=r.session_id;store.set('vera_last_chat',sid);LAST=r;vera(r,{first:true});input(true,x.audience==='customer'?`Reply as ${x.to}…`:`Reply as ${x.to||'the owner'}…`);insights()}
-async function send(text,img){if(!sid||(!text.trim()&&!img))return;me(text,img);$('#in').value='';handle(await post('/demo/api/reply',{session_id:sid,message:text,image:img||null}))}
-async function deals(){if(!sid)return;handle(await post('/demo/api/deals',{session_id:sid}))}
+ sid=r.session_id;store.set('vera_last_chat',sid);LH.start(r);LAST=r;vera(r,{first:true});input(true,x.audience==='customer'?`Reply as ${x.to}…`:`Reply as ${x.to||'the owner'}…`);insights()}
+async function send(text,img){if(!sid||(!text.trim()&&!img))return;me(text,img);$('#in').value='';const r=await post('/demo/api/reply',{session_id:sid,message:text,image:img||null});
+ if(!r.error)LH.add(sid,[{role:'me',text,img:img||null},{role:'vera',r}],r.action==='end');handle(r)}
+async function deals(){if(!sid)return;const r=await post('/demo/api/deals',{session_id:sid});if(!r.error)LH.add(sid,[{role:'deals'},{role:'vera',r}]);handle(r)}
 function insights(){const r=LAST;if(!r)return;const p=r.profile||{};const cu=p.customer;
  let h=`<div class="dh"><b>ⓘ How Vera wrote this</b><button onclick="drawer(false)">×</button></div>`;
  h+=`<div class="sec"><h4>Why this message, why now</h4><p>${esc(r.rationale.split('. Levers')[0])}.</p><p style="color:var(--muted);font-size:12px">Trigger: ${esc(r.trigger_kind.replace(/_/g,' '))}${r.placeholder?' (no payload — built from the merchant\'s own data)':''} · Language: ${esc(({en:'English','hi-en':'Hinglish',hi:'Hindi'})[r.language]||r.language)}</p></div>`;
@@ -1058,5 +1101,5 @@ $('#insBtn').onclick=()=>drawer(!$('#shell').classList.contains('drawer'));$('#d
 $('#f').onsubmit=e=>{e.preventDefault();send($('#in').value)};
 $('#att').onclick=()=>$('#file').click();
 $('#file').onchange=e=>{const f=e.target.files[0];if(!f)return;const img=new Image(),rd=new FileReader();rd.onload=()=>{img.onload=()=>{const k=Math.min(1,1024/Math.max(img.width,img.height));const c=document.createElement('canvas');c.width=img.width*k;c.height=img.height*k;c.getContext('2d').drawImage(img,0,0,c.width,c.height);send($('#in').value,c.toDataURL('image/jpeg',.82))};img.src=rd.result};rd.readAsDataURL(f);e.target.value=''};
-(async()=>{SC=await (await fetch('/demo/api/scenarios')).json();side();empty();const last=store.get('vera_last_chat');if(last)await openChat(last,true)})();
+(async()=>{SC=await (await fetch('/demo/api/scenarios')).json();side();empty();let last=store.get('vera_last_chat');if(!(last&&await openChat(last,true))){const l=await allChats();if(l.length)await openChat(l[0].id,true)}})();
 </script></body></html>"""

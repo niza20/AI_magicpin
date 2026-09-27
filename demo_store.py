@@ -113,3 +113,19 @@ def reset_for_tests(path: str) -> None:
         if _CONN is not None:
             _CONN.close()
         _PATH, _CONN = path, None
+
+
+def import_chat(chat_id: str, owner: str, title: str, subtitle: str, start: dict, log: list, ended: bool = False) -> bool:
+    """Re-create a chat from the browser's own copy (after the server lost its disk). Never overwrites another owner's chat."""
+    with _LOCK:
+        c = _conn()
+        row = c.execute("SELECT owner FROM chats WHERE id=?", (chat_id,)).fetchone()
+        if row:
+            return row[0] == owner
+        ts = [e.get("ts") for e in log if isinstance(e, dict) and isinstance(e.get("ts"), (int, float))]
+        created, updated = (min(ts), max(ts)) if ts else (time.time(), time.time())
+        c.execute("INSERT INTO chats(id, owner, created, updated, title, subtitle, start, log, ended) VALUES (?,?,?,?,?,?,?,?,?)",
+                  (chat_id, owner, created, updated, str(title)[:120], str(subtitle)[:160], json.dumps(start, ensure_ascii=False),
+                   json.dumps(log, ensure_ascii=False), int(bool(ended))))
+        c.commit()
+    return True
