@@ -126,6 +126,9 @@ class IntentRouter(Agent):
     def classify(self, message: str, deadline: Optional[float] = None) -> IntentResult:
         t = (message or "").strip()
         low = t.lower()
+        if re.search(r"[\u0900-\u097F]", low):
+            from ..translit import to_roman
+            low = to_roman(low)            # "हाँ, कर दीजिए" → "haan, kar dijiye" so the same rules apply
         lang = detect_language(t)
         sig: list[str] = []
 

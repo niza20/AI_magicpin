@@ -206,7 +206,7 @@ class ReplyEngine:
         state.merchant_intent = intent.merchant_intent
         lang_now = language_signal(message)
         if lang_now and not state.language_locked:
-            state.language = lang_now if not (lang_now == "hi" and not state.customer) else "hi-en"
+            state.language = lang_now                  # a merchant who writes Devanagari gets Devanagari back
         w = self._working(state, message)
         mi = intent.merchant_intent
 
@@ -226,6 +226,9 @@ class ReplyEngine:
 
         b = w["brief"]
         last_vera = (state.bot_bodies() or [""])[-1] if len(state.bot_bodies()) else ""
+        if re.search(r"[\u0900-\u097F]", message):
+            from .translit import to_roman
+            message = to_roman(message)            # "कोई और आइडिया?" → "koi aur ideas?" for the checks below
         # a number / "first" right after the ideas menu → deliver that idea as a ready draft
         pick = _PICK.match(message) if state.ideas else None
         if pick:

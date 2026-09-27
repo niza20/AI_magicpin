@@ -209,11 +209,11 @@ def test_demo_chats_are_saved_listed_restored_and_private(tmp_path):
     c = TestClient(bot.app)
     me, other = "owner_aaaaaaaa1", "owner_bbbbbbbb2"
     sc = next(x for x in c.get("/demo/api/scenarios").json() if x["merchant"].startswith("Mylari"))
-    s = c.post("/demo/api/start", json={"trigger_id": sc["trigger_id"], "owner": me}).json()
+    s = c.post("/demo/api/start", json={"trigger_id": sc["trigger_id"], "viewer": me}).json()
     sid = s["session_id"]
-    c.post("/demo/api/reply", json={"session_id": sid, "message": "Yes, go ahead", "owner": me})
+    c.post("/demo/api/reply", json={"session_id": sid, "message": "Yes, go ahead", "viewer": me})
     demo_ui._sessions.clear()                                   # server restart: in-memory state gone
-    r = c.post("/demo/api/reply", json={"session_id": sid, "message": "GO", "owner": me}).json()
+    r = c.post("/demo/api/reply", json={"session_id": sid, "message": "GO", "viewer": me}).json()
     assert r["body"].startswith(("Sent", "Bhej diya")), "rebuilt by replay and continued from the right state"
     lst = c.get("/demo/api/chats", params={"owner": me}).json()
     assert [x["id"] for x in lst] == [sid] and lst[0]["turns"] == 2
@@ -239,21 +239,21 @@ def test_browser_copy_is_reimported_after_server_lost_its_disk(tmp_path):
     c = TestClient(bot.app)
     me = "owner_cccccccc3"
     sc = next(x for x in c.get("/demo/api/scenarios").json() if x["merchant"].startswith("Mylari"))
-    s = c.post("/demo/api/start", json={"trigger_id": sc["trigger_id"], "owner": me}).json()
-    r1 = c.post("/demo/api/reply", json={"session_id": s["session_id"], "message": "Yes, go ahead", "owner": me}).json()
+    s = c.post("/demo/api/start", json={"trigger_id": sc["trigger_id"], "viewer": me}).json()
+    r1 = c.post("/demo/api/reply", json={"session_id": s["session_id"], "message": "Yes, go ahead", "viewer": me}).json()
     local = {"id": s["session_id"], "title": s["ui"]["title"], "subtitle": s["ui"]["subtitle"], "start": s["start_spec"],
              "log": [{"role": "vera", "r": s, "ts": 1}, {"role": "me", "text": "Yes, go ahead", "ts": 2}, {"role": "vera", "r": r1, "ts": 3}]}
     demo_store.reset_for_tests(str(tmp_path / "b.db"))          # disk wiped + restart
     demo_ui._sessions.clear()
     assert c.get(f"/demo/api/chats/{s['session_id']}", params={"owner": me}).status_code == 404
-    assert c.post("/demo/api/chats/import", json={**local, "owner": me}).json()["imported"]
+    assert c.post("/demo/api/chats/import", json={**local, "viewer": me}).json()["imported"]
     assert c.get("/demo/api/chats", params={"owner": me}).json()[0]["id"] == s["session_id"]
-    r = c.post("/demo/api/reply", json={"session_id": s["session_id"], "message": "GO", "owner": me}).json()
+    r = c.post("/demo/api/reply", json={"session_id": s["session_id"], "message": "GO", "viewer": me}).json()
     assert r["body"].startswith(("Sent", "Bhej diya"))
     # someone else can't hijack or overwrite it; junk is rejected
-    assert not c.post("/demo/api/chats/import", json={**local, "owner": "owner_dddddddd4"}).json()["imported"]
-    assert c.post("/demo/api/chats/import", json={**local, "id": "../x", "owner": me}).status_code == 400
-    assert c.post("/demo/api/chats/import", json={**local, "start": {"type": "evil"}, "id": "abcdef012345", "owner": me}).status_code == 400
+    assert not c.post("/demo/api/chats/import", json={**local, "viewer": "owner_dddddddd4"}).json()["imported"]
+    assert c.post("/demo/api/chats/import", json={**local, "id": "../x", "viewer": me}).status_code == 400
+    assert c.post("/demo/api/chats/import", json={**local, "start": {"type": "evil"}, "id": "abcdef012345", "viewer": me}).status_code == 400
 
 
 def test_features_tab_stats_are_live():

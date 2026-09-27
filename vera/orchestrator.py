@@ -226,7 +226,11 @@ class Orchestrator:
                       f"Want me to send them a one-time opt-in request from your number instead? Reply YES.",
                 "hi-en": f"{sal}, main {first} ko is baare mein message kar sakti thi, lekin {covers_hi}. "
                          f"Main aapke number se ek one-time opt-in request bhej doon? Reply YES."}
-        out = {"body": body.get(lang if lang != "hi" else "hi-en", body["en"]), "cta": "binary_yes_stop", "send_as": "vera",
+        text = body.get(lang if lang != "hi" else "hi-en", body["en"])
+        if lang == "hi":
+            from .translit import to_devanagari
+            text = to_devanagari(text, (sal, first, scope_txt))
+        out = {"body": text, "cta": "binary_yes_stop", "send_as": "vera",
                "suppression_key": skey,
                "rationale": f"Consent gate: {cust.consent_reason}. Customer outreach blocked; asked merchant to request opt-in instead."}
         trace.append(TraceStep("policy_checker", f"consent blocked customer send: {cust.consent_reason}"))

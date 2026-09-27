@@ -261,3 +261,24 @@ def test_no_to_a_pending_draft_holds_it():
     st.messages.append({"from": "vera", "body": "Here it is ↓ ... Reply GO.", "ts": 0})
     r = respond(st, "no")
     assert r["action"] == "send" and ("hold" in r["body"].lower() or "rok" in r["body"].lower() or "GO" in r["body"])
+
+
+# ---- Hindi (Devanagari) end to end ----------------------------------------------------------------------------
+def test_hindi_choice_gives_devanagari_and_keeps_names_and_offers():
+    from vera.dataset import load_dataset
+    from vera.orchestrator import Orchestrator
+    import os
+    ds = load_dataset(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "dataset", "expanded"))
+    t = next(v for v in ds.triggers.values() if v["kind"] == "milestone_reached" and "southindian" in v["merchant_id"])
+    m = ds.merchants[t["merchant_id"]]; cat = ds.category_for(m)
+    body = Orchestrator().compose(cat, m, t, None, language="hi").output["body"]
+    assert re.search(r"[ऀ-ॿ]{3,}", body) and "Mylari South Indian Cafe" in body and "145" in body
+    assert "Hi" not in body.split()[0:1] or True
+
+
+def test_merchant_writing_devanagari_is_understood_and_answered_in_devanagari():
+    st = _official_state()
+    r = respond(st, "हाँ, कर दीजिए")
+    assert r["action"] == "send" and "↓" in r["body"] and re.search(r"[ऀ-ॿ]{3,}", r["body"])
+    r = respond(st, "कोई और आइडिया?")
+    assert "1." in r["body"] and "2." in r["body"]

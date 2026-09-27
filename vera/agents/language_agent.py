@@ -55,7 +55,7 @@ class LanguageAgent(Agent):
                         break
         if not lang:
             lang, source = "en", "default"
-        if lang == "hi" and not customer_facing and source != "explicit user choice":
+        if lang == "hi" and not customer_facing and source not in ("explicit user choice", "latest reply"):
             lang = "hi-en"   # Roman Hinglish reads most naturally for merchants on WhatsApp
         rules = {
             "en": ["plain Indian English", "short sentences"],

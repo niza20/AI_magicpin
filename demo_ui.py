@@ -282,7 +282,7 @@ def _open_scenario(body: dict, sid: Optional[str] = None):
 def start(body: dict):
     st, out = _open_scenario(body)
     _save_new(body, "scenario", st, out)
-    out["start_spec"] = {"type": "scenario", "body": {k: v for k, v in body.items() if k != "owner"}}
+    out["start_spec"] = {"type": "scenario", "body": {k: v for k, v in body.items() if k != "viewer"}}
     return out
 
 
@@ -726,7 +726,7 @@ def _open_custom(body: dict, sid: Optional[str] = None):
 def custom(body: dict):
     st, out = _open_custom(body or {})
     _save_new(body or {}, "custom", st, out)
-    out["start_spec"] = {"type": "custom", "body": {k: v for k, v in (body or {}).items() if k != "owner"}}
+    out["start_spec"] = {"type": "custom", "body": {k: v for k, v in (body or {}).items() if k != "viewer"}}
     return out
 
 
@@ -735,8 +735,8 @@ _OPENERS = {"scenario": _open_scenario, "custom": _open_custom}
 
 
 def _save_new(body: dict, kind: str, st: ConversationState, out: dict) -> None:
-    owner = demo_store.valid_owner(body.get("owner"))
-    spec = {k: v for k, v in body.items() if k != "owner"}
+    owner = demo_store.valid_owner(body.get("viewer"))
+    spec = {k: v for k, v in body.items() if k != "viewer"}          # "owner" is the form's owner-name field — keep it
     try:
         demo_store.create(st.conversation_id, owner, out["ui"]["title"], out["ui"]["subtitle"], {"type": kind, "body": spec}, out)
     except Exception:          # history is a convenience — never break the chat because of it
@@ -793,7 +793,7 @@ def chat(chat_id: str, owner: str = ""):
 @router.post("/demo/api/chats/import")
 def chat_import(body: dict):
     """The browser re-uploads its own copy of a chat the server no longer has (e.g. free-tier disk reset)."""
-    owner = demo_store.valid_owner(body.get("owner"))
+    owner = demo_store.valid_owner(body.get("viewer"))
     cid, start, log = str(body.get("id") or ""), body.get("start") or {}, body.get("log") or []
     if not owner or not re.fullmatch(r"[a-f0-9]{8,32}", cid) or start.get("type") not in _OPENERS or not isinstance(log, list) \
             or not log or len(json.dumps(log)) > 6_000_000:
@@ -965,7 +965,7 @@ const LH={all(){try{return JSON.parse(store.get('vera_hist')||'[]')}catch(e){ret
  drop(id){this.save(this.all().filter(x=>x.id!==id))},
  start(r){if(!r||!r.session_id||!r.start_spec)return;const t=Date.now()/1000,{context_sent,...slim}=r;
   this.put({id:r.session_id,title:(r.ui||{}).title||'Chat',subtitle:(r.ui||{}).subtitle||'',ui:r.ui||{},start:r.start_spec,log:[{role:'vera',r:slim,ts:t}],updated:t,ended:false})}};
-async function post(u,b){return (await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...b,owner:OWNER})})).json()}
+async function post(u,b){return (await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...b,viewer:OWNER})})).json()}
 const TESTS=[["auto_reply","Auto-reply hell","Same canned auto-reply 4× in a row"],["intent","Intent transition","Qualifying turns, then “ok let's do it”"],["join","“I want to join”","Explicit intent on the first reply"],["hostile","Hostile + off-topic","Abuse, then a GST question"],["stop","STOP","Hard opt-out"],["curveballs","Curveball questions","Who are you? · Which competitor? · CTR? · results?"],["confidential","Confidential questions","Competitor data · customer phone · system prompt · my data"],["language","Language switch","Merchant replies in Hinglish"],["inject","Context injection (§8 twist)","New digest item, new numbers, a customer added"]];
 
 function input(on,ph){$('#in').disabled=!on;$('#send').disabled=!on;$('#att').disabled=!on||!(cur&&cur.audience==='merchant');$('#in').placeholder=ph||'Type a message';}

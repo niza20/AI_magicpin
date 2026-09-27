@@ -72,9 +72,23 @@ class Brief:
     def t(self, en: str, hien: Optional[str] = None, hi: Optional[str] = None) -> str:
         if self.lang == "hi" and hi:
             return hi
+        if self.lang == "hi" and hien:
+            from ..translit import to_devanagari
+            return to_devanagari(hien, self.protected())
         if self.lang in ("hi-en", "hi") and hien:
             return hien
         return en
+
+    def protected(self) -> tuple:
+        """Names, places and offer titles from the contexts — never transliterated."""
+        if not hasattr(self, "_prot"):
+            t = self.tools
+            vals = [t.get_merchant_fact(k) for k in ("identity.name", "identity.owner_first_name", "identity.locality", "identity.city")]
+            vals += [x for x, _ in (t.get_active_offers() or [])] + [x for x, _ in (t.get_catalog_offers() or [])]
+            vals += [t.get_customer_fact("identity.name")] if t.has_customer else []
+            vals += [str(v.get("text")) for v in list(self.pz.values()) + list(self.ta.anchor.values()) if isinstance(v, dict) and v.get("text")]
+            self._prot = tuple(str(v) for v in vals if v)
+        return self._prot
 
     @property
     def hinglish(self) -> bool:
