@@ -129,3 +129,14 @@ def test_demo_photo_and_deals_flow():
     # customers only get deal alerts with promotional consent
     s2 = c.post("/demo/api/start", json={"trigger_id": "trg_019_chronic_refill_grandfather"}).json()
     assert c.post("/demo/api/deals", json={"session_id": s2["session_id"]}).json()["action"] == "end"
+
+
+def test_demo_restaurant_dish_photos():
+    import os
+    if not os.path.exists(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "dataset", "expanded")):
+        pytest.skip("official dataset not expanded")
+    c = TestClient(bot.app)
+    sc = {x["merchant"]: x for x in c.get("/demo/api/scenarios").json()}
+    assert sc["SK Pizza Junction"]["thumb"] and not sc["Dr. Meera's Dental Clinic"]["thumb"], "photos only for restaurants"
+    s = c.post("/demo/api/start", json={"trigger_id": sc["SK Pizza Junction"]["trigger_id"]}).json()
+    assert s["media"]["label"] == "Wood-fired pizza" and s["media"]["url"].startswith("https://images.unsplash.com/")
