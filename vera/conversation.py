@@ -1100,10 +1100,14 @@ class ReplyEngine:
             why = "Customer asked for booking status → direct answer."
             if state.booked:
                 return say(b.t(f"Yes ✅ You're booked for {mid(state.booked)} at {name}" + (f", {where}" if where else "") + ". Reply CHANGE to reschedule.",
-                               f"Haan ✅ Aapki booking {state.booked}, {name} mein pakki hai. Reschedule ke liye CHANGE reply karein."))
+                               f"Haan ✅ Aapki booking {state.booked}, {name} mein pakki hai. Reschedule ke liye CHANGE reply karein."),
+                           b.t(f"Confirmed ✅ {state.booked} at {name}. We'll remind you before the visit.",
+                               f"Confirm hai ✅ {state.booked}, {name}. Visit se pehle reminder bhejenge."),
+                           b.t(f"All good — your {mid(state.booked)} slot is locked in 🙂", f"Sab theek — aapka {state.booked} ka slot pakka hai 🙂"))
             state.cust_stage = "ask_time"
             return say(b.t("Not yet — send me a day and time (for example 'tomorrow 5pm') and I'll book it right away.",
-                           "Abhi nahi — ek din aur time bhej dijiye (jaise 'kal 5 baje'), main turant book kar dungi."))
+                           "Abhi nahi — ek din aur time bhej dijiye (jaise 'kal 5 baje'), main turant book kar dungi."),
+                       b.t("Not booked yet — just tell me which day and time suits you.", "Abhi booking nahi hui — bas din aur time bata dijiye."))
         # 3) reschedule
         if re.search(r"\b(change|reschedule|another time|different time|dusra time|time badal|shift)\b", low):
             state.cust_stage = "ask_time"
