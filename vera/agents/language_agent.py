@@ -7,7 +7,7 @@ from typing import Optional
 from ..tools import ContextTools
 from ..types import CategoryProfile, LanguagePlan
 from .base import Agent
-from .intent_router import detect_language
+from .intent_router import detect_language, language_signal
 
 
 def normalise_pref(pref) -> Optional[str]:
@@ -35,9 +35,10 @@ class LanguageAgent(Agent):
         lang: Optional[str] = None
         if override in ("en", "hi-en", "hi"):
             lang, source = override, "explicit user choice"
-        if not lang and latest_reply and len(latest_reply.split()) >= 2:
-            # one-word replies ("ok", "hmm", "?") carry no language signal — keep the profile's language
-            lang, source = detect_language(latest_reply), "latest reply"
+        sig = language_signal(latest_reply) if latest_reply else None
+        if not lang and sig:
+            # short replies / button taps ("ok", "Yes, go ahead") carry no language signal — keep the profile's language
+            lang, source = sig, "latest reply"
         if not lang and customer_facing:
             lang, source = normalise_pref(tools.get_customer_fact("identity.language_pref")
                                           or tools.get_customer_fact("identity.language")), "customer language_pref"

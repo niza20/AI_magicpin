@@ -132,7 +132,7 @@ def _official_state():
     ("My nephew handles my Google page", "forward"),
     ("Do it tomorrow morning", "schedule it for tomorrow morning"),
     ("Kitne customers aayenge isse?", "waada nahi"),
-    ("Call me", "call you"),
+    ("Please call me", "call you"),
 ])
 def test_curveballs_get_on_topic_answers(msg, must):
     r = respond(_official_state(), msg)
@@ -142,3 +142,39 @@ def test_curveballs_get_on_topic_answers(msg, must):
 def test_curveball_never_invents_a_forecast():
     r = respond(_official_state(), "How many customers will I get from this?")
     assert "can't promise" in r["body"].lower()
+
+
+# ---- Vera delivers exactly what it offered (review request ≠ Google post), GO confirms that thing -----------------
+def _official(tid):
+    from vera.dataset import load_dataset
+    import os
+    root = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "dataset", "expanded")
+    if not os.path.exists(root):
+        pytest.skip("official dataset not expanded")
+    ds = load_dataset(root)
+    t = ds.triggers[tid]; m = ds.merchants[t["merchant_id"]]; cat = ds.category_for(m)
+    return new_state("p_" + tid, cat, m, t, None, compose(cat, m, t, None)["body"])
+
+
+def test_yes_delivers_the_offered_review_request_not_a_post():
+    from vera.dataset import load_dataset
+    import os
+    ds = load_dataset(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "dataset", "expanded"))
+    tid = next(t for t, v in ds.triggers.items() if v["kind"] == "milestone_reached" and "southindian" in v["merchant_id"])
+    st = _official(tid)
+    assert "review-request" in st.bot_bodies()[0]
+    r = respond(st, "Yes, go ahead")
+    assert "review" in r["body"].lower() and "draft post" not in r["body"].lower()
+    r = respond(st, "thanks for this info")
+    assert "GO" in r["body"] and "should I go ahead" not in r["body"], "never re-ask something already delivered"
+    assert respond(st, "GO")["body"].startswith(("Sent", "Bhej diya"))
+
+
+def test_button_reply_does_not_flip_language():
+    from vera.dataset import load_dataset
+    import os
+    ds = load_dataset(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "dataset", "expanded"))
+    tid = next(t for t, v in ds.triggers.items() if v["kind"] == "milestone_reached" and "southindian" in v["merchant_id"])
+    st = _official(tid)
+    r = respond(st, "Yes, go ahead")
+    assert re.search(r"\b(ke liye|jaayega|dijiye|karein)\b", r["body"]), "Hinglish merchant tapping an English button stays in Hinglish"

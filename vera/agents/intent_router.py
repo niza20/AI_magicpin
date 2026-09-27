@@ -202,3 +202,17 @@ class IntentRouter(Agent):
     @staticmethod
     def is_price_question(message: str) -> bool:
         return bool(_PRICE.search((message or "").lower()))
+
+
+_CONFIRM_ONLY = re.compile(r"^\s*(yes|yeah|yep|ok|okay|sure|go|go ahead|yes,? go ahead|not now|no|no thanks|thanks|thank you|done|fine)[\s!.,]*$", re.I)
+
+
+def language_signal(message: str) -> Optional[str]:
+    """Language to switch to based on this reply, or None if it's too short / a button-style confirmation to tell."""
+    words = len((message or "").split())
+    lang = detect_language(message or "")
+    if not lang or _CONFIRM_ONLY.match(message or ""):
+        return None
+    if lang == "en":
+        return "en" if words >= 3 else None
+    return lang if words >= 2 else None

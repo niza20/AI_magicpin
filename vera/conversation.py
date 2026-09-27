@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from .agents.composer import Brief
-from .agents.intent_router import AutoReplyDetector, IntentRouter, detect_language
+from .agents.intent_router import AutoReplyDetector, IntentRouter, detect_language, language_signal
 from .agents.validators import FactChecker, PolicyChecker
 from .orchestrator import Orchestrator
 from .types import Draft, LanguagePlan, StrategyPlan, TraceStep
@@ -94,6 +94,42 @@ class ConversationState:
         self.ctas_used.append(cta)
 
 
+_PROMISES = [  # (kind, pattern over Vera's last offer) — first match wins; order matters
+    ("thanks_post", r"thank-you post|thank you post"),
+    ("review_request", r"review[- ]request|photo review|review ke liye invite|invite .{0,40}review|reviews? (maang|request)"),
+    ("review_replies", r"owner repl|review repl"),
+    ("checklist", r"checklist"),
+    ("summary", r"2-min summary|summary"),
+    ("renewal", r"renew|reactivat"),
+    ("verification", r"verification|verify"),
+    ("reminder", r"reminder bhej|remind you|reminder a day|ek din pehle reminder"),
+    ("customer_msg", r"check-in whatsapp|whatsapp draft|nudge|batch check|wapas bula|win-?back"),
+    ("pin", r"\bpin\b"),
+    ("program", r"pehla draft|first draft|launch post"),
+    ("post", r"\bpost\b"),
+]
+_ACK = re.compile(r"^\s*(thanks?|thank you|thx|ty|shukriya|dhanyavaad|dhanyawad|great|nice|cool|awesome|super|perfect|good|"
+                  r"got it|noted|okay noted|ok noted|theek hai|thik hai|accha|achha)\b[\w\s!.🙏👍]*$", re.I)
+
+
+def promised(state) -> tuple[str, Optional[str]]:
+    """What Vera last offered to do, read from its own words (so a YES delivers exactly that)."""
+    for body in reversed(state.bot_bodies()):
+        asks = [x for x in re.split(r"(?<=[.!?])\s+", body) if "?" in x or re.search(r"\bYES\b", x)]
+        text = " ".join(asks[-2:]) if asks else ""
+        if not text:
+            continue
+        low = text.lower()
+        for kind, rx in _PROMISES:
+            if re.search(rx, low):
+                # the offer Vera named — matched against real offer titles, never parsed free-form
+                titles = [str(o.get("title")) for o in (state.merchant or {}).get("offers", []) if isinstance(o, dict) and o.get("title")]
+                titles += [str(o.get("title")) for o in (state.category or {}).get("offer_catalog", []) if isinstance(o, dict) and o.get("title")]
+                named = sorted((t for t in titles if t in text), key=len, reverse=True)
+                return kind, (named[0] if named else None)
+    return "post", None
+
+
 class ReplyEngine:
     def __init__(self) -> None:
         self.orch = Orchestrator()
@@ -134,8 +170,8 @@ class ReplyEngine:
         intent = router.classify(message)
         state.intents.append(intent.merchant_intent)
         state.merchant_intent = intent.merchant_intent
-        lang_now = detect_language(message)
-        if lang_now and len(message.split()) >= 2 and not state.language_locked:
+        lang_now = language_signal(message)
+        if lang_now and not state.language_locked:
             state.language = lang_now if not (lang_now == "hi" and not state.customer) else "hi-en"
         w = self._working(state, message)
         mi = intent.merchant_intent
@@ -188,6 +224,27 @@ class ReplyEngine:
             return self._send(state, w, [b.t(f"Scheduled ✅ Your {what} is queued for publishing — you'll see it on your listing shortly. Anything else you want to add this week?",
                                              f"Schedule ho gaya ✅ Aapka {'photo wala post' if what != 'deal' else 'deal'} publish queue mein hai — thodi der mein listing pe dikhega. Is hafte aur kuch add karna hai?")],
                               "open_ended", "Merchant confirmed with GO → publish and offer the next step.")
+        if mi == "explicit_action" and state.actions_requested and re.search(
+                r"^\s*(go|go ahead|send|send it|publish|post it|bhej do|daal do|live kar do)\b", message.lower()):
+            b = w["brief"]
+            kind = (w.get("promise") or ("post", None))[0]
+            cn = b.cust_noun()
+            done = {
+                "review_request": (f"Sent ✅ The review request is going out to your recent happy {cn} today. I'll let you know as new reviews come in.",
+                                   f"Bhej diya ✅ Review request aaj aapke recent happy {cn} ko ja rahi hai. Naye reviews aate hi bataungi."),
+                "thanks_post": (f"Live ✅ The thank-you post is scheduled and the review request goes out to your recent {cn} today.",
+                                f"Live ✅ Thank-you post schedule ho gaya aur review request aaj aapke recent {cn} ko ja rahi hai."),
+                "customer_msg": (f"Sent ✅ The WhatsApp is going out to your {cn} today. I'll share replies and bookings here.",
+                                 f"Bhej diya ✅ WhatsApp aaj aapke {cn} ko ja raha hai. Replies aur bookings yahin share karungi."),
+                "review_replies": ("Posted ✅ The owner replies go up on those reviews today.", "Post ho gaya ✅ Owner replies aaj un reviews pe lag jaayenge."),
+                "pin": ("Pinned ✅ The offer is now at the top of your Google profile.", "Pin ho gaya ✅ Offer ab aapke Google profile ke top pe hai."),
+                "summary": (f"Done ✅ The forward-ready note is formatted — share it with your {cn} whenever you like.",
+                            f"Ho gaya ✅ Forward-ready note format ho gaya — jab chahein {cn} ke saath share kijiye."),
+            }.get(kind, ("Scheduled ✅ Your post is queued and goes live on your listing today.",
+                         "Schedule ho gaya ✅ Aapka post queue mein hai aur aaj listing pe live ho jaayega."))
+            state.actions_requested.append("go")
+            return self._send(state, w, [b.t(done[0] + " Anything else for this week?", done[1] + " Is hafte aur kuch?")],
+                              "open_ended", f"Merchant confirmed with GO → '{kind}' executed; offer the next step.")
         if mi == "explicit_action":
             state.exit_state = None
             state.merchant_sentiment = "positive"
@@ -196,6 +253,16 @@ class ReplyEngine:
             body = self._act(w, already, price=router.is_price_question(message), when=_when(message))
             return self._send(state, w, body, "open_ended",
                               "Explicit go-ahead → ACT immediately (no re-qualification): delivered the artifact + next step.")
+        if _ACK.match(message) and mi not in ("explicit_action",):
+            b = w["brief"]
+            if state.actions_requested:
+                return self._send(state, w, [b.t("Glad it helps 🙂 Reply GO whenever you want it live — or send any edits.",
+                                                 "Khushi hui 🙂 Jab chahein GO reply kar dijiye — ya edits bhej dijiye.")],
+                                  "binary_yes_stop", "Acknowledgement after delivery → confirm the one pending step, no re-pitch.")
+            a_en, a_hi = self._action_phrase(w)
+            return self._send(state, w, [b.t(f"Happy to help 🙂 Whenever you're ready, I can {a_en} — just reply YES.",
+                                             f"Khushi hui 🙂 Jab ready hon, main {a_hi.rstrip('?')} — bas YES reply kijiye.")],
+                              "binary_yes_stop", "Acknowledgement → warm, one low-pressure CTA.")
         if mi == "question":
             if router.is_price_question(message):
                 return self._send(state, w, self._price(w), "binary_yes_stop", "Price question answered only from context; no invented pricing.")
@@ -213,7 +280,7 @@ class ReplyEngine:
         if state.unclear_count >= 2:
             state.exit_state = "waiting"
             return {"action": "wait", "wait_seconds": 3600, "rationale": "Still unclear after one clarification — waiting."}
-        return self._send(state, w, self._clarify(w), "binary_yes_stop", "Unclear reply → one binary clarification.")
+        return self._send(state, w, self._clarify(w, bool(state.actions_requested)), "binary_yes_stop", "Unclear reply → one binary clarification.")
 
     # ------------------------------------------------------------- plumbing
     def _working(self, state: ConversationState, latest: Optional[str]) -> dict:
@@ -224,6 +291,7 @@ class ReplyEngine:
         if state.language:
             w["lang"] = LanguagePlan(language=state.language, tone=w["lang"].tone, style_rules=w["lang"].style_rules)
         w["brief"] = Brief(w["ta"], w["pz"], w["prof"], w["lang"], w["cust"], w["tools"])
+        w["promise"] = promised(state)
         return w
 
     def _send(self, state: ConversationState, w: dict, bodies, cta: str, rationale: str, allow: tuple = ()) -> dict:
@@ -285,6 +353,22 @@ class ReplyEngine:
     def _action_phrase(self, w: dict) -> tuple[str, str]:
         fam = w["ta"].family
         b = w["brief"]
+        kind = (w.get("promise") or ("", None))[0]
+        cn = b.cust_noun()
+        by_promise = {
+            "review_request": (f"send the review-request WhatsApp to your recent happy {cn}", f"recent happy {cn} ko review-request WhatsApp bhej doon"),
+            "customer_msg": (f"draft the WhatsApp for your {cn}", f"{cn} ke liye WhatsApp draft kar doon"),
+            "thanks_post": ("put up the thank-you post and invite reviews", "thank-you post daal doon aur reviews ke liye invite kar doon"),
+            "pin": ("pin the offer on your Google profile", "offer ko Google profile pe pin kar doon"),
+            "verification": ("start the verification request", "verification request start kar doon"),
+            "reminder": ("save the details and remind you a day before", "details save karke ek din pehle reminder bhej doon"),
+            "review_replies": ("draft the review replies", "review replies draft kar doon"),
+            "checklist": ("put together the checklist", "checklist bana doon"),
+            "summary": ("send you the 2-min summary + a forward-ready draft", "2-min summary + forward-ready draft bhej doon"),
+            "renewal": ("process the renewal", "renewal process kar doon"),
+        }
+        if kind in by_promise:
+            return by_promise[kind]
         return {
             "knowledge": ("send you the 2-min summary + a forward-ready draft", "2-min summary + forward-ready draft bhej doon"),
             "regulation": ("put together the compliance checklist", "compliance checklist bana doon"),
@@ -322,11 +406,11 @@ class ReplyEngine:
                     f"{topic} mein main madad nahi kar paungi, {b.sal()} — main {name} ki Google listing, posts, offers aur customer messages sambhalti hoon. "
                     f"Tab tak, main {a_hi}? Reply YES.")]
 
-    def _post_text(self, w: dict) -> tuple[str, str]:
+    def _post_text(self, w: dict, promised_offer: Optional[str] = None) -> tuple[str, str]:
         b = w["brief"]
         name, loc = b.P("name") or "", b.P("locality")
         where = f"{name}, {loc}" if loc else name
-        offer, kind = b.offer()
+        offer, kind = (promised_offer, "active") if promised_offer else b.offer()
         fam = w["ta"].family
         lead = ""
         if fam == "festival" and b.A("name"):
@@ -350,6 +434,10 @@ class ReplyEngine:
                         "Kaam chalu hai ✅ Sab queue mein hai — final OK ke liye preview yahin aayega. Kuch badlaav chahiye?"),
                     b.t("Done on my side ✅ Preview is next — just reply with edits if you want any.",
                         "Meri taraf se ho gaya ✅ Agla step preview hai — edits ho toh reply kar dijiye.")]
+        kind, promised_offer = w.get("promise") or ("post", None)
+        done = self._deliver_promise(w, kind, promised_offer, when)
+        if done:
+            return done
         if fam == "knowledge":
             title, src, summ = b.A("title"), b.A("source"), b.A("summary")
             return [b.t(f"Sending it now 📄 Summary: {summ or title}" + (f" — {src}." if src else ".") +
@@ -379,13 +467,44 @@ class ReplyEngine:
             miss = b.A("missing") or "the missing details"
             return [b.t(f"On it ✅ I'll fill in {miss} from your existing details and share a preview here. Send your opening hours in one line and I'll add them too.",
                         f"Kaam shuru ✅ {miss} aapki existing details se fill karke preview yahin bhejti hoon. Opening hours ek line mein bhej dijiye, woh bhi add kar dungi.")]
-        post_en, post_hi = self._post_text(w)
+        post_en, post_hi = self._post_text(w, promised_offer)
         extra_en = " Pricing for the post itself isn't in my records here, so I'll have the magicpin team confirm — no guesses." if price else ""
         extra_hi = " Post ki pricing mere records mein nahi hai, magicpin team confirm karegi — main guess nahi karungi." if price else ""
         live_en = f"I'll schedule it for {when} — reply GO to confirm, or send any edits." if when else "Reply GO and it goes live today, or send any edits."
         live_hi = f"Main ise {when} ke liye schedule kar dungi — confirm karne ke liye GO reply karein, ya edits bhej dijiye." if when else "GO reply karein toh aaj hi live kar doon, ya edits bhej dijiye."
         return [b.t(f"Done ✅ Here's the draft post for {name} ↓\n{post_en}\n{live_en}{extra_en}",
                     f"Ho gaya ✅ {name} ke liye draft post ↓\n{post_hi}\n{live_hi}{extra_hi}")]
+
+    def _deliver_promise(self, w: dict, kind: str, offer: Optional[str], when: Optional[str]) -> Optional[list[str]]:
+        """Deliver exactly what the opening message offered (review request, customer WhatsApp, pin, ...)."""
+        b = w["brief"]
+        cn = b.cust_noun()
+        name = b.P("name") or ""
+        go_en = f"Reply GO and I'll send it{' ' + when if when else ''}, or send any edits."
+        go_hi = f"GO reply karein, main{' ' + when if when else ''} bhej dungi — ya edits bhej dijiye."
+        if kind in ("review_request", "thanks_post"):
+            msg = f"Hi! Thank you for choosing {name} 🙏 If you enjoyed your visit, a quick Google review would mean a lot to us — it takes 30 seconds. See you again soon!"
+            post = f"Thank-you post + review request ready ↓\nPost: Thank you to every customer who made this possible 🙏 — team {name}\n"
+            pre_en = "Done ✅ " + (post if kind == "thanks_post" else "")
+            pre_hi = "Ho gaya ✅ " + (post if kind == "thanks_post" else "")
+            return [b.t(f"{pre_en}Review-request WhatsApp for your recent happy {cn} ↓\n{msg}\n(Your Google review link is added automatically.) {go_en}",
+                        f"{pre_hi}Recent happy {cn} ke liye review-request WhatsApp ↓\n{msg}\n(Google review link apne aap jud jaayega.) {go_hi}")]
+        if kind == "customer_msg":
+            off = offer or b.offer()[0]
+            tail = f" {off} is available this month." if off else ""
+            msg = f"Hi! It's been a while — we'd love to see you at {name} this week.{tail} Reply here to book a slot. — {name}"
+            return [b.t(f"Draft ready ✅ WhatsApp for your {cn} ↓\n{msg}\n{go_en}", f"Draft ready ✅ {cn} ke liye WhatsApp ↓\n{msg}\n{go_hi}")]
+        if kind == "pin":
+            off = offer or b.offer()[0] or "your top offer"
+            return [b.t(f"Done ✅ “{off}” is set to be pinned at the top of your Google profile while traffic is high. Reply GO to confirm, or tell me a different offer.",
+                        f"Ho gaya ✅ “{off}” ko Google profile ke top pe pin karne ke liye set kar diya hai. Confirm karne ke liye GO reply karein, ya koi aur offer bataiye.")]
+        if kind == "verification":
+            return [b.t(f"Started ✅ I've raised the Google verification request for {name}. Google usually confirms by postcard or a phone call — reply here when you get the code and I'll finish it.",
+                        f"Shuru kar diya ✅ {name} ke liye Google verification request raise kar di hai. Google postcard ya phone call se confirm karta hai — code aate hi yahan reply kijiye, baaki main kar dungi.")]
+        if kind == "reminder":
+            return [b.t("Saved ✅ I'll send you the details and a reminder the day before. Anything else for this week?",
+                        "Save kar liya ✅ Details aur ek din pehle reminder bhej dungi. Is hafte aur kuch?")]
+        return None
 
     # ------------------------------------------------------- photos & deals
     def respond_photo(self, state: ConversationState, image_ref: str, caption: str = "") -> dict:
@@ -641,8 +760,11 @@ class ReplyEngine:
         return [b.t(f"{lead_en}I can {a_en} right now — takes you 1 minute to approve. Reply YES.",
                     f"{lead_hi}Main abhi {a_hi.rstrip('?')} — approve karne mein aapka 1 minute lagega. Reply YES.")]
 
-    def _clarify(self, w: dict) -> list[str]:
+    def _clarify(self, w: dict, delivered: bool = False) -> list[str]:
         b = w["brief"]
+        if delivered:
+            return [b.t(f"Just to check, {b.sal()} — shall I go ahead with the draft above? Reply GO, or send any edits.",
+                        f"Bas confirm karna tha, {b.sal()} — upar wala draft aage badha doon? GO reply karein, ya edits bhejein.")]
         a_en, a_hi = self._action_phrase(w)
         return [b.t(f"Just to check, {b.sal()} — should I go ahead and {a_en}? Reply YES or NO.",
                     f"Bas confirm karna tha, {b.sal()} — main {a_hi}? YES ya NO reply karein.")]

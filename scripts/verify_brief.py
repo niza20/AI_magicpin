@@ -315,6 +315,15 @@ silent = convo(TID, ["ok", "ok", "ok", "ok"])
 check(S, "knows when to stop: repeated non-answers don't loop forever", len(silent) <= 4 and silent[-1]["action"] in ("end", "wait", "send"),
       [a["action"] for a in silent])
 
+deliv_bad = []
+for tid in DS.triggers:
+    cat_, m_, t_, cu_ = ctx(tid)
+    st = new_state("d_" + tid, cat_, m_, t_, cu_, bot.compose(cat_, m_, t_, cu_)["body"])
+    r1, r2 = respond(st, "Yes, go ahead"), respond(st, "GO")
+    if r1["action"] != "send" or "Noted," in r1.get("body", "") or (not cu_ and r2["action"] == "send" and "Noted," in r2.get("body", "")):
+        deliv_bad.append(tid)
+check(S, "every opener: 'Yes, go ahead' delivers what was offered, 'GO' confirms it (100 triggers)", not deliv_bad, str(deliv_bad[:3]))
+
 # ============================================================ pain points (brief §3) + compulsion levers (§10)
 S = "brief §3/§10"
 families = Counter(classify_family(t["kind"], t.get("scope", "merchant")) for t in DS.triggers.values())
