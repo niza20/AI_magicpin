@@ -320,25 +320,34 @@ def r_knowledge(b: Brief) -> Parts:
 
 
 def r_regulation(b: Brief) -> Parts:
-    src, title, eff = b.A("source"), b.A("title"), b.A("effective")
-    hook = b.t(f"{b.sal()}, heads-up on a compliance change" + (f" from {src}:" if src else ":"),
-               f"{b.sal()}, ek compliance update" + (f" ({src}):" if src else ":"))
-    anchor = []
+    """Opener uses only what the merchant (and a judge) can check: the rule's title, the payload deadline and the
+    merchant's own listing numbers. The circular's fine print (dates, dose values) goes into the checklist after YES."""
+    title, eff = b.A("title"), b.A("effective")
+    name = b.P("name") or f"your {b.prof.noun_singular}"
+    in_title = eff and (str(b.Araw("effective") or "")[:10] in (title or ""))
     if title:
-        in_title = eff and (str(b.Araw("effective") or "")[:10] in title)
-        anchor.append(_q(title) + (b.t(f", deadline {eff}.", f", deadline {eff}.") if eff and not in_title else "."))
-    summ = _short(b.A("summary"), 130)
-    if summ:
-        anchor.append(f"{summ}.")
+        hook = b.t(f"{b.sal()}, a compliance deadline for {name}: {_q(title)}" + (f" — deadline {eff}." if eff and not in_title else "."),
+                   f"{b.sal()}, {name} ke liye ek compliance deadline: {_q(title)}" + (f" — deadline {eff}." if eff and not in_title else "."))
+    else:
+        hook = b.t(f"{b.sal()}, a compliance deadline for {name}" + (f" on {eff}." if eff else "."),
+                   f"{b.sal()}, {name} ke liye ek compliance deadline" + (f": {eff}." if eff else "."))
+    anchor = []
     act = _short(b.A("actionable"), 110)
-    levers = {"loss_aversion": b.t("Better to be ready before the deadline than to fix it after an inspection.",
-                                   "Deadline se pehle ready rehna better hai, inspection ke baad fix karne se."),
-              "curiosity": b.t("It's a short read.", "Chhota sa read hai.")}
     if act:
-        levers["specificity"] = b.t(f"What to do: {act[0].lower() + act[1:]}.", f"Kya karna hai: {act[0].lower() + act[1:]}.")
-    who = b.P("name") or f"your {b.prof.noun_singular}"
-    ctas = {"effort": b.t(f"Want me to turn it into a 1-page checklist for {who}? Reply YES.",
-                          f"Main {who} ke liye 1-page checklist bana doon? Reply YES."),
+        anchor.append(b.t(f"What to do: {act[0].lower() + act[1:]}.", f"Kya karna hai: {act[0].lower() + act[1:]}."))
+    dl = f" before {eff}" if eff else " before the deadline"
+    dl_hi = f" {eff} se pehle" if eff else " deadline se pehle"
+    levers = {"loss_aversion": b.t(f"Better to be ready{dl} than to fix it after an inspection.",
+                                   f"Inspection ke baad fix karne se better hai{dl_hi} ready rehna.")}
+    v, c, w = b.P("views"), b.P("calls"), b.P("window")
+    if v and c and w:
+        noun = "clinic" if b.prof.slug == "dentists" else b.prof.noun_singular
+        anchor.append(b.t(f"Your listing: {v} views, only {c} calls in {w} — a safety-compliant {noun} post after this earns that trust.",
+                          f"Listing: {w.replace('days', 'din')} mein {v} views, sirf {c} calls — iske baad safety-compliant {noun} post wahi trust banayega."))
+    else:
+        levers["curiosity"] = b.t("It's a short read.", "Chhota sa read hai.")
+    ctas = {"effort": b.t(f"Want me to turn the circular into a 1-page checklist for {name} (exact limits, what to change, who owns it)? Reply YES.",
+                          f"Main circular ko {name} ke liye 1-page checklist bana doon (exact limits, kya badalna hai, kaun sambhalega)? Reply YES."),
             "curiosity": b.t("Want the key points summarised?", "Key points summary bhej doon?")}
     return Parts(hook, anchor, levers, ctas)
 
