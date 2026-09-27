@@ -329,3 +329,20 @@ def test_pharmacy_refill_flow_day_then_time_items_and_hindi():
     st.language, st.language_locked = "hi", True
     r = respond(st, "can you bring paracetamol along with you?")
     assert "paracetamol" in r["body"] and "pharmacist" in r["body"] and "कल शाम" in r["body"]
+
+
+def test_customer_yes_follows_what_the_opening_offered():
+    from vera.dataset import load_dataset
+    import os
+    ds = load_dataset(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "dataset", "expanded"))
+
+    def st_for(tid):
+        t = ds.triggers[tid]; m = ds.merchants[t["merchant_id"]]; c = ds.customers[t["customer_id"]]; cat = ds.category_for(m)
+        return new_state("o", cat, m, t, c, compose(cat, m, t, c)["body"])
+    st = st_for("trg_076_appointment_tomorrow_m_019_karim_salon_lu")        # reminder → YES confirms it
+    assert respond(st, "Yes, go ahead")["body"].startswith("Confirmed ✅ See you tomorrow")
+    assert "no special offer" in respond(st, "your special offers")["body"], "offers answered honestly (none live)"
+    st = st_for("trg_017_kids_yoga_trial_followup_karthik")                 # one named slot → YES books it
+    assert respond(st, "yes")["body"].startswith("Booked ✅ Sat 3 May, 8am")
+    from vera.conversation import cust_time
+    assert cust_time("can't make it tomorrow, saturday 11am?") == "Saturday, 11am"
