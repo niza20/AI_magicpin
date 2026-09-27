@@ -479,7 +479,7 @@ class TriggerAnalyst(Agent):
                            ("rating", ("avg_rating", "rating"))):
             v, p = self._pv(*keys)
             if v is not None:
-                self._put(anchor, name, v, p, humanize(v) if name in ("window", "sentiment") else str(v))
+                self._put(anchor, name, v, p, humanize(v) if name in ("window", "sentiment", "theme") else str(v))
         v, p = self._pv("common_quote", "quote")
         if isinstance(v, str):
             self._put(anchor, "quote", v, p, v[:90])

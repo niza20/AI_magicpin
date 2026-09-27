@@ -169,3 +169,30 @@ def test_brand_new_merchant_and_trigger_outside_the_dataset(client):
     assert len(acts) == 1
     b = acts[0]["body"]
     assert "Imran" in b and "rain" in b.lower() and "delivery" in b.lower() and "appointments" not in b
+
+
+def test_try_your_own_scenario_every_template_and_category():
+    import demo_ui
+    c = TestClient(bot.app)
+    meta = c.get("/demo/api/custom/templates").json()
+    assert {t["id"] for t in meta["templates"]} >= {"weather", "festival", "competitor", "perf_dip", "reviews", "recall"}
+    for cat in meta["categories"]:
+        for t in meta["templates"]:
+            fields = {f["name"]: f["default"] for f in t["fields"]}
+            fields.update((meta["field_defaults"].get(cat) or {}).get(t["id"], {}))
+            r = c.post("/demo/api/custom", json={"category": cat, "template": t["id"], "fields": fields, "language": "en",
+                                                 **meta["defaults"][cat]}).json()
+            assert r["body"] and not r["fallback"], (cat, t["id"], r.get("body"))
+            assert meta["defaults"][cat]["owner"].split()[-1] in r["body"] or t["audience"] == "customer"
+    # it's a real conversation: the owner can reply
+    r = c.post("/demo/api/custom", json={"category": "restaurants", "template": "weather", "name": "Rain Cafe", "owner": "Imran",
+                                         "fields": {"condition": "heavy rain"}, "language": "en"}).json()
+    assert "Imran" in r["body"] and "delivery" in r["body"].lower() and r["context_sent"]["trigger"]["kind"] == "weather_alert"
+    assert c.post("/demo/api/reply", json={"session_id": r["session_id"], "message": "yes go ahead"}).json()["action"] == "send"
+    # no consent → Vera does not message the customer
+    r = c.post("/demo/api/custom", json={"category": "salons", "template": "recall", "language": "en",
+                                         "fields": {"customer_name": "Aarti", "service": "hair spa", "consent": "0"}}).json()
+    assert r["consent_blocked"]
+    # hostile input is bounded and never breaks composition
+    r = c.post("/demo/api/custom", json={"category": "nope", "template": "nope", "name": "<script>x</script>" * 20, "views": "abc"}).json()
+    assert r["body"] and len(r["context_sent"]["merchant"]["identity"]["name"]) <= 80

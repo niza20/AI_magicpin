@@ -651,8 +651,15 @@ def r_local_event(b: Brief) -> Parts:
     if is_match:
         wk = b.Araw("_weeknight")
         wd = _weekday(b.Araw("date"))
-        levers["loss_aversion"] = b.t((f"It's a {wd} match, so " if wk is False and wd else "It's a weekend match, so " if wk is False else "") + f"{cn} will be ordering in or looking for a place to watch — the listing that posts first gets seen.",
-                                      (f"{wd} ka match hai, toh " if wk is False and wd else "Weekend match hai, toh " if wk is False else "") + f"{cn} order karenge ya match dekhne ki jagah dhoondhenge — jo pehle post karta hai wahi dikhta hai.")
+        pre_en = f"It's a {wd} match, so " if wk is False and wd else "It's a weekend match, so " if wk is False else "On match night "
+        pre_hi = f"{wd} ka match hai, toh " if wk is False and wd else "Weekend match hai, toh " if wk is False else "Match wali shaam "
+        food = b.prof.slug == "restaurants"
+        if food:
+            levers["loss_aversion"] = b.t(pre_en + f"{cn} will be ordering in or looking for a place to watch — the listing that posts first gets seen.",
+                                          pre_hi + f"{cn} order karenge ya match dekhne ki jagah dhoondhenge — jo pehle post karta hai wahi dikhta hai.")
+        else:
+            levers["loss_aversion"] = b.t(pre_en + f"evening slots tend to go quiet as {cn} stay in to watch — an early-slot post fills the gap before it opens.",
+                                          pre_hi + f"shaam ke slots khaali rehte hain kyunki {cn} match dekhte hain — early-slot post pehle se woh gap bhar deta hai.")
         own = _own_numbers(b, trend=False)
         if own:
             levers["specificity"] = own
@@ -662,7 +669,8 @@ def r_local_event(b: Brief) -> Parts:
         if "trial_ending_soon" in (b.tools.get_merchant_fact("signals") or []):
             levers["reciprocity"] = b.t("Your trial ends soon — a match night is the best week to see what the listing can do.",
                                         "Aapka trial khatam hone wala hai — match night yeh dekhne ka best mauka hai ki listing kya kar sakti hai.")
-        ctas = _post_cta(b, "put up a match-night post before the first ball", "pehli ball se pehle ek match-night post laga doon")
+        ctas = _post_cta(b, "put up a match-night post before the first ball", "pehli ball se pehle ek match-night post laga doon") if food else \
+            _post_cta(b, "post an 'earlier slots on match day' update for your " + cn, f"{cn} ke liye 'match day pe early slots' wala update post kar doon")
     else:
         levers["loss_aversion"] = b.t(f"{cn.capitalize()} planning to visit may get caught out — a quick update keeps them coming.",
                                       f"Aane wale {cn} confuse ho sakte hain — ek quick update se woh aate rahenge.")
@@ -694,8 +702,8 @@ def r_reputation(b: Brief) -> Parts:
                          "woh reviews nikaal kar aapke OK ke liye polite owner replies draft kar doon")
         return Parts(hook, [], levers, ctas)
     w_en, w_hi = b.window()
-    hook = b.t(f"{b.sal()}, {cnt + ' ' if cnt else ''}reviews {w_en + ' ' if w_en else 'this week '}mention “{theme}”.",
-               f"{b.sal()}, {w_hi + ' ' if w_hi else 'is hafte '}{cnt + ' ' if cnt else ''}reviews mein “{theme}” ka zikr hai.")
+    hook = b.t(f"{b.sal()}, {cnt + ' ' if cnt else ''}reviews {w_en + ' ' if w_en else 'this week '}bring up the same issue: {theme.lower()}.",
+               f"{b.sal()}, {w_hi + ' ' if w_hi else 'is hafte '}{cnt + ' ' if cnt else ''}reviews mein ek hi baat aa rahi hai: {theme.lower()}.")
     anchor = [b.t(f"One says: {_q(b.A('quote'))}.", f"Ek review: {_q(b.A('quote'))}.")] if b.A("quote") else []
     levers = {}
     if b.P("rating"):

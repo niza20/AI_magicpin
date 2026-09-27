@@ -62,7 +62,7 @@ RULES = {  # category → ordered (keywords, photo key); first match on merchant
                     (("pizza",), "pizza"), (("chai", "tea", "cafe", "café"), "chai"), (("kabab", "kebab"), "kebab"),
                     (("tandoor", "tikka"), "tandoori"), (("biryani",), "biryani"), (("burger",), "burger"), ((), "restaurant")],
     "dentists": [((), "dental")],
-    "salons": [(("spa", "facial", "massage"), "spa"), (("hair", "cut", "balayage", "colour", "color"), "haircut"), ((), "salon")],
+    "salons": [(("hair", "cut", "balayage", "colour", "color", "keratin"), "haircut"), (("spa", "facial", "massage"), "spa"), ((), "salon")],
     "gyms": [(("yoga",), "yoga"), ((), "gym")],
     "pharmacies": [((), "pharmacy")],
 }
@@ -444,6 +444,218 @@ def portfolio(body: dict):
     return {"merchant": m["identity"]["name"], "week": [{"day": days[i], **w} for i, w in enumerate(week)]}
 
 
+# ---------------------------------------------------------------- "Try your own scenario"
+# Each template: id, label, kind, audience, fields (name, label, type, default). The builder turns the form into the
+# exact trigger payload shape the official dataset uses, so the same agent pipeline runs on it unchanged.
+CUSTOM_TEMPLATES = [
+    {"id": "weather", "label": "Weather alert", "kind": "weather_alert", "fields": [
+        ("condition", "Weather", "text", "heavy rain"), ("date", "Date", "date", "2026-09-29")]},
+    {"id": "festival", "label": "Festival coming up", "kind": "festival_upcoming", "fields": [
+        ("festival", "Festival", "text", "Diwali"), ("date", "Festival date", "date", "2026-11-08")]},
+    {"id": "competitor", "label": "Competitor opened nearby", "kind": "competitor_opened", "fields": [
+        ("competitor_name", "Competitor name", "text", "Urban Bites"), ("distance_km", "Distance (km)", "number", "0.8"),
+        ("their_offer", "Their offer", "text", "Flat 40% off")]},
+    {"id": "perf_dip", "label": "Calls / views dropped", "kind": "perf_dip", "fields": [
+        ("metric", "Metric", "select:calls,views", "calls"), ("pct", "Drop in last 7 days (%)", "number", "35")]},
+    {"id": "perf_spike", "label": "Calls / views jumped", "kind": "perf_spike", "fields": [
+        ("metric", "Metric", "select:calls,views", "views"), ("pct", "Rise in last 7 days (%)", "number", "25"),
+        ("likely_driver", "Likely reason", "text", "weekend offer post")]},
+    {"id": "match", "label": "Cricket match today", "kind": "ipl_match_today", "fields": [
+        ("match", "Match", "text", "CSK vs RCB"), ("venue", "Venue", "text", "Chepauk Stadium"),
+        ("date", "Date", "date", "2026-09-27"), ("time", "Start time", "time", "19:30")]},
+    {"id": "reviews", "label": "New review theme", "kind": "review_theme_emerged", "fields": [
+        ("theme", "Theme", "text", "slow service"), ("count", "Reviews mentioning it (30 days)", "number", "5"),
+        ("quote", "A customer quote", "text", "waited 40 minutes for the order")]},
+    {"id": "milestone", "label": "Close to a review milestone", "kind": "milestone_reached", "fields": [
+        ("value_now", "Reviews now", "number", "96"), ("milestone_value", "Milestone", "number", "100")]},
+    {"id": "renewal", "label": "Plan renewal due", "kind": "renewal_due", "fields": [
+        ("plan", "Plan", "text", "Pro"), ("days_remaining", "Days left", "number", "10"), ("renewal_amount", "Renewal amount (₹)", "number", "4999")]},
+    {"id": "research", "label": "New research / industry news", "kind": "research_digest", "fields": [
+        ("title", "Headline", "text", "Online menus with photos get 2x more orders"), ("source", "Source", "text", "magicpin insights, Sep 2026"),
+        ("summary", "Key finding", "text", "Listings with 10+ dish photos saw twice the order conversion of text-only menus")]},
+    {"id": "dormant", "label": "Merchant has gone quiet", "kind": "dormant_with_vera", "fields": [
+        ("days", "Days since they last replied", "number", "30")]},
+    {"id": "recall", "label": "Customer due for a visit", "kind": "recall_due", "audience": "customer", "fields": [
+        ("customer_name", "Customer name", "text", "Aarti"), ("service", "Service due", "text", "hair spa"),
+        ("last_visit", "Last visit", "date", "2026-06-20"), ("slot", "Slot to offer", "text", "Sat 4 Oct, 5pm"),
+        ("consent", "Customer opted in to reminders", "checkbox", "1")]},
+]
+_TPL = {t["id"]: t for t in CUSTOM_TEMPLATES}
+_CAT_DEFAULTS = {  # sensible form defaults per category
+    "restaurants": ("Spice Route Kitchen", "Rahul", "Bengaluru", "Indiranagar", "Veg Thali @ ₹199"),
+    "salons": ("Glow Studio", "Neha", "Pune", "Baner", "Hair Spa @ ₹599"),
+    "dentists": ("SmileCare Dental", "Dr. Kapoor", "Delhi", "Lajpat Nagar", "Dental Cleaning @ ₹499"),
+    "gyms": ("PowerHouse Fitness", "Vikram", "Mumbai", "Andheri West", "First Month @ ₹999"),
+    "pharmacies": ("CityCare Pharmacy", "Anita", "Jaipur", "Vaishali Nagar", "10% off on monthly refills"),
+}
+
+
+_CAT_FIELDS = {  # per-category overrides of the template defaults so every starting point is realistic
+    "restaurants": {"competitor": {"competitor_name": "Urban Bites", "their_offer": "Flat 40% off on dine-in"},
+                    "reviews": {"theme": "slow service", "quote": "waited 40 minutes for the order"},
+                    "research": {"title": "Menus with dish photos get 2x more orders", "summary": "Listings with 10+ dish photos saw twice the order conversion of text-only menus"},
+                    "recall": {"customer_name": "Rohan", "service": "family dinner", "slot": "Sat 4 Oct, 8pm"}},
+    "salons": {"competitor": {"competitor_name": "Luxe Salon", "their_offer": "Haircut @ ₹199"},
+               "reviews": {"theme": "long waiting time", "quote": "had to wait 30 minutes despite a booking"},
+               "research": {"title": "Keratin demand up 35% before the wedding season", "source": "Salon Trends India, Sep 2026",
+                            "summary": "Pre-wedding smoothening and keratin bookings rise sharply from October"},
+               "recall": {"customer_name": "Aarti", "service": "hair spa", "slot": "Sat 4 Oct, 5pm"}},
+    "dentists": {"competitor": {"competitor_name": "Bright Smile Clinic", "their_offer": "Dental Cleaning @ ₹199"},
+                 "reviews": {"theme": "long waiting time", "quote": "waited 45 minutes past my appointment"},
+                 "research": {"title": "3-month recall cuts caries in high-risk adults", "source": "JIDA, Sep 2026",
+                              "summary": "High-risk adults on a 3-month fluoride recall had fewer new caries than on a 6-month recall"},
+                 "recall": {"customer_name": "Priya", "service": "6-month cleaning", "slot": "Wed 8 Oct, 6pm"}},
+    "gyms": {"competitor": {"competitor_name": "FitZone", "their_offer": "First Month @ ₹499"},
+             "reviews": {"theme": "crowded evenings", "quote": "no free racks after 7pm"},
+             "research": {"title": "Strength training twice a week cuts injury risk", "source": "Sports Medicine India, Sep 2026",
+                          "summary": "Members who strength-train twice weekly report fewer injuries and stay 2x longer"},
+             "recall": {"customer_name": "Karan", "service": "personal training session", "slot": "Mon 6 Oct, 7am"}},
+    "pharmacies": {"competitor": {"competitor_name": "MedPlus Express", "their_offer": "20% off on medicines"},
+                   "reviews": {"theme": "medicines out of stock", "quote": "had to come back twice for my prescription"},
+                   "research": {"title": "Refill reminders lift chronic-Rx retention", "source": "magicpin pharmacy data, Sep 2026",
+                                "summary": "Pharmacies sending WhatsApp refill reminders keep far more chronic patients"},
+                   "recall": {"customer_name": "Mr. Sharma", "service": "monthly BP medicine refill", "slot": "Tue 7 Oct, home delivery"}},
+}
+
+
+@router.get("/demo/api/custom/templates")
+def custom_templates():
+    ds = _dataset()
+    cats = sorted(ds.categories) if ds else sorted(_CAT_DEFAULTS)
+    return {"categories": cats, "defaults": {k: dict(zip(("name", "owner", "city", "locality", "offer"), v)) for k, v in _CAT_DEFAULTS.items()},
+            "field_defaults": _CAT_FIELDS,
+            "templates": [{"id": t["id"], "label": t["label"], "audience": t.get("audience", "merchant"),
+                           "fields": [{"name": f[0], "label": f[1], "type": f[2], "default": f[3]} for f in t["fields"]]} for t in CUSTOM_TEMPLATES]}
+
+
+def _txt(v, n: int = 80) -> str:
+    return re.sub(r"\s+", " ", str(v or "")).strip()[:n]
+
+
+def _num(v, default: float, lo: float = 0, hi: float = 1e7) -> float:
+    try:
+        return min(hi, max(lo, float(str(v).replace(",", ""))))
+    except (TypeError, ValueError):
+        return default
+
+
+def _ival(x: float):
+    return int(x) if float(x).is_integer() else x
+
+
+def _custom_ctx(body: dict):
+    import copy
+    from datetime import date, datetime
+    ds = _dataset()
+    slug = body.get("category") if ds and body.get("category") in ds.categories else "restaurants"
+    tpl = _TPL.get(body.get("template")) or _TPL["weather"]
+    f = body.get("fields") or {}
+    d = dict(zip(("name", "owner", "city", "locality", "offer"), _CAT_DEFAULTS.get(slug, _CAT_DEFAULTS["restaurants"])))
+    cat = copy.deepcopy(ds.categories[slug]) if ds else {"slug": slug}
+    mid = "m_custom_" + re.sub(r"[^a-z0-9]+", "_", _txt(body.get("name") or d["name"]).lower()).strip("_")[:30]
+    lang = body.get("language") if body.get("language") in ("en", "hi-en", "hi") else "hi-en"
+    views = int(_num(body.get("views"), 2400)); calls = int(_num(body.get("calls"), 24))
+    m = {"merchant_id": mid, "category_slug": slug,
+         "identity": {"name": _txt(body.get("name")) or d["name"], "owner_first_name": _txt(body.get("owner"), 30) or d["owner"],
+                      "city": _txt(body.get("city"), 40) or d["city"], "locality": _txt(body.get("locality"), 40) or d["locality"],
+                      "languages": {"en": ["en"], "hi-en": ["en", "hi"], "hi": ["hi"]}[lang], "verified": True},
+         "subscription": {"status": "active", "plan": "Pro", "days_remaining": 120},
+         "performance": {"window_days": 30, "views": views, "calls": calls,
+                         "ctr": round(_num(body.get("ctr"), 3.0, 0, 100) / 100, 4), "delta_7d": {}},
+         "offers": [{"id": "o_custom_1", "title": _txt(body.get("offer")), "status": "active"}] if _txt(body.get("offer")) else [],
+         "signals": [], "review_themes": [], "conversation_history": []}
+    today = date(2026, 9, 27)
+    k, p, c = tpl["kind"], {}, None
+    tid = f"trg_custom_{tpl['id']}"
+    if tpl["id"] == "weather":
+        p = {"condition": _txt(f.get("condition")) or "heavy rain", "city": m["identity"]["city"], "date": _txt(f.get("date"), 10)}
+    elif tpl["id"] == "festival":
+        fd = _txt(f.get("date"), 10)
+        try:
+            days = (date.fromisoformat(fd) - today).days
+        except ValueError:
+            fd, days = "2026-11-08", 42
+        p = {"festival": _txt(f.get("festival")) or "Diwali", "date": fd, "days_until": max(days, 0), "category_relevance": [slug]}
+    elif tpl["id"] == "competitor":
+        p = {"competitor_name": _txt(f.get("competitor_name")) or "a new competitor", "distance_km": _ival(round(_num(f.get("distance_km"), 1.0, 0, 50), 1)),
+             "their_offer": _txt(f.get("their_offer")), "opened_date": "2026-09-24"}
+    elif tpl["id"] in ("perf_dip", "perf_spike"):
+        metric = f.get("metric") if f.get("metric") in ("calls", "views") else "calls"
+        pct = _num(f.get("pct"), 30, 1, 95) / 100 * (-1 if tpl["id"] == "perf_dip" else 1)
+        base = views if metric == "views" else calls
+        p = {"metric": metric, "delta_pct": round(pct, 2), "window": "7d", "vs_baseline": max(1, round(base / 4.3 / (1 + pct)))}
+        if tpl["id"] == "perf_spike" and _txt(f.get("likely_driver")):
+            p["likely_driver"] = _txt(f.get("likely_driver"))
+        m["performance"]["delta_7d"] = {f"{metric}_pct": round(pct, 2)}
+    elif tpl["id"] == "match":
+        dd, tt = _txt(f.get("date"), 10) or "2026-09-27", _txt(f.get("time"), 5) or "19:30"
+        try:
+            wk = datetime.fromisoformat(f"{dd}T{tt}").weekday() < 5
+        except ValueError:
+            dd, tt, wk = "2026-09-27", "19:30", False
+        p = {"match": _txt(f.get("match")) or "CSK vs RCB", "venue": _txt(f.get("venue")), "city": m["identity"]["city"],
+             "match_time_iso": f"{dd}T{tt}:00+05:30", "is_weeknight": wk}
+    elif tpl["id"] == "reviews":
+        theme = _txt(f.get("theme"), 40) or "slow service"
+        p = {"theme": re.sub(r"\s+", "_", theme.lower()), "occurrences_30d": int(_num(f.get("count"), 5, 1, 999)), "trend": "rising",
+             "common_quote": _txt(f.get("quote"), 120)}
+        m["review_themes"] = [{"theme": p["theme"], "sentiment": "neg", "occurrences_30d": p["occurrences_30d"], "common_quote": p["common_quote"]}]
+    elif tpl["id"] == "milestone":
+        now, goal = int(_num(f.get("value_now"), 96, 1)), int(_num(f.get("milestone_value"), 100, 1))
+        p = {"metric": "review_count", "value_now": now, "milestone_value": max(goal, now), "is_imminent": goal - now <= 10}
+    elif tpl["id"] == "renewal":
+        p = {"days_remaining": int(_num(f.get("days_remaining"), 10, 0, 365)), "plan": _txt(f.get("plan"), 20) or "Pro",
+             "renewal_amount": int(_num(f.get("renewal_amount"), 4999, 0))}
+        m["subscription"].update(plan=p["plan"], days_remaining=p["days_remaining"])
+    elif tpl["id"] == "research":
+        item = {"id": "d_custom_item", "kind": "research", "title": _txt(f.get("title"), 140) or "New industry finding",
+                "source": _txt(f.get("source"), 60) or "magicpin insights", "summary": _txt(f.get("summary"), 200)}
+        cat.setdefault("digest", []).append(item)
+        p = {"category": slug, "top_item_id": item["id"]}
+    elif tpl["id"] == "dormant":
+        p = {"days_since_last_merchant_message": int(_num(f.get("days"), 30, 1, 999)), "last_topic": "weekly_check_in"}
+    elif tpl["id"] == "recall":
+        name = _txt(f.get("customer_name"), 30) or "Aarti"
+        service = _txt(f.get("service"), 40) or "follow-up visit"
+        last = _txt(f.get("last_visit"), 10) or "2026-06-20"
+        slot = _txt(f.get("slot"), 40)
+        consent = str(f.get("consent", "1")).lower() in ("1", "true", "on", "yes")
+        p = {"service_due": re.sub(r"\s+", "_", service.lower()), "last_service_date": last, "due_date": "2026-10-01",
+             "available_slots": [{"iso": "2026-10-04T17:00:00+05:30", "label": slot}] if slot else []}
+        c = {"customer_id": "c_custom_" + re.sub(r"[^a-z0-9]+", "_", name.lower()), "merchant_id": mid,
+             "identity": {"name": name, "language_pref": {"en": "english", "hi-en": "hi-en mix", "hi": "hindi"}[lang]},
+             "relationship": {"first_visit": "2025-12-01", "last_visit": last, "visits_total": 3, "services_received": [service]},
+             "state": "lapsed_soft", "preferences": {"preferred_slots": "weekday_evening", "channel": "whatsapp", "reminder_opt_in": consent},
+             "consent": {"opted_in_at": "2025-12-01", "scope": ["recall_reminders", "appointment_reminders"]} if consent else {}}
+    t = {"id": tid, "kind": k, "scope": "customer" if c else "merchant", "merchant_id": mid, "urgency": 3,
+         "suppression_key": f"custom:{tpl['id']}:{mid}", "payload": p}
+    if c:
+        t["customer_id"] = c["customer_id"]
+    return cat, m, t, c, lang
+
+
+@router.post("/demo/api/custom")
+def custom(body: dict):
+    cat, m, t, c, lang = _custom_ctx(body or {})
+    res = _orch.compose(cat, m, t, c, language=lang)
+    sid = uuid.uuid4().hex[:12]
+    st = ConversationState(conversation_id=sid, merchant_id=m["merchant_id"], customer_id=(c or {}).get("customer_id"),
+                           trigger_id=t["id"], category=cat, merchant=m, trigger=t, customer=c, merchant_memory={},
+                           language=lang, language_locked=True)
+    st.record_bot(res.output["body"], res.output["cta"])
+    with _lock:
+        _sessions[sid] = st
+        while len(_sessions) > 2000:          # keep the demo store bounded
+            _sessions.pop(next(iter(_sessions)))
+    out = {"session_id": sid, **_compose_payload(res, cat, m, t, c),
+           "context_sent": {"merchant": m, "trigger": t, **({"customer": c} if c else {})},
+           "fallback": bool(res.extras.get("fallback")), "consent_blocked": bool(res.extras.get("consent_blocked"))}
+    if res.extras.get("family") not in _NO_PHOTO_FAMILIES:
+        out["media"] = _dish(m, t.get("kind", ""))
+    out["buttons"] = ["Yes, go ahead", "Not now"] if out["cta"] == "binary_yes_stop" else []
+    return out
+
+
 @router.get("/demo", response_class=HTMLResponse)
 def page():
     return HTMLResponse(_PAGE)
@@ -482,6 +694,13 @@ select{background:var(--panel);color:var(--ink);border:1px solid var(--line);bor
 .tm{display:block;text-align:right;color:var(--muted);font-size:11px;padding:0 9px 5px}
 .bt{border-top:1px solid var(--line);display:flex}.bt button{flex:1;border:0;background:transparent;color:var(--btn);padding:9px;cursor:pointer;font-weight:600;font-size:14px}.bt button+button{border-left:1px solid var(--line)}.bt button:disabled{color:var(--muted);cursor:default}
 .ph{margin:4px 4px 0;border-radius:6px;overflow:hidden;position:relative;max-width:380px}.ph img{display:block;width:100%;height:190px;object-fit:cover}.ph figcaption{font-size:11px;color:var(--muted);padding:4px 6px 0}.ph .lab{position:absolute;left:8px;top:8px;background:rgba(0,0,0,.55);color:#fff;font-size:12px;padding:2px 8px;border-radius:10px}.ph .fb{height:190px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:18px;background:linear-gradient(135deg,#e2725b,#f2b544)}.ra{position:relative;overflow:hidden}.ra img.av{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.form{padding:10px 14px 18px;display:grid;gap:9px}.form h5{margin:6px 0 0;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--accent)}
+.form label{font-size:12px;color:var(--muted);display:grid;gap:3px}.form label.ck{display:flex;align-items:center;gap:8px;color:var(--ink);font-size:13px}
+.form input:not([type=checkbox]),.form select{border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:8px;padding:7px 9px;font-size:14px;width:100%;box-sizing:border-box}
+.form .two{display:grid;grid-template-columns:1fr 1fr;gap:8px}.form .three{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+.form .go{background:var(--accent);color:#fff;border:0;border-radius:20px;padding:11px;font-weight:600;font-size:14px;cursor:pointer;margin-top:4px}.form .go:disabled{opacity:.6}
+.form .hint{font-size:12px;color:var(--muted);margin:0}
+details.ctx summary{cursor:pointer;font-size:13px;color:var(--accent)}details.ctx pre{font-size:11px;background:var(--bg);padding:8px;border-radius:6px;overflow:auto;max-height:320px}
 .post{max-width:380px;margin:4px 10px 8px;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--panel)}.post img{display:block;width:100%;max-height:190px;object-fit:cover}.post .pl{font-size:11px;color:var(--muted);padding:6px 10px 0;text-transform:uppercase;letter-spacing:.05em}.post .pt{padding:4px 10px 9px;font-size:14px}
 .u img{display:block;max-width:260px;border-radius:6px;margin:4px}
 .why{border:0;background:none;color:var(--muted);font-size:11px;cursor:pointer;padding:0 9px 5px}.why:hover{color:var(--accent)}
@@ -506,10 +725,10 @@ mark{border-radius:3px;padding:0 1px;color:inherit}mark.merchant{background:rgba
 .verdict{display:table;margin:14px auto;padding:9px 16px;border-radius:10px;font-weight:700}.verdict.ok{background:var(--good);color:var(--goodink)}.verdict.no{background:var(--bad);color:var(--badink)}
 .day{background:var(--them);border-radius:10px;padding:10px 12px;margin:10px 0;box-shadow:var(--shadow)}.day h5{margin:0 0 4px;font-size:13px}.day h5 small{color:var(--muted);font-weight:400}
 #pick{display:none}
-@media (max-width:900px){.shell,.shell.drawer{grid-template-columns:1fr}#side{display:none}#pick{display:block;max-width:60vw}#drawer{position:fixed;inset:59px 0 0 12%;z-index:5;box-shadow:-4px 0 18px rgba(0,0,0,.2)}.steps{grid-template-columns:1fr}#log{padding:12px 3%}.b{max-width:90%}}
+@media (max-width:900px){.shell,.shell.drawer{grid-template-columns:1fr}#side{display:none}.shell.custom #side{display:block;max-height:48vh;border-right:0;border-bottom:1px solid var(--line)}#pick{display:block;max-width:60vw}#drawer{position:fixed;inset:59px 0 0 12%;z-index:5;box-shadow:-4px 0 18px rgba(0,0,0,.2)}.steps{grid-template-columns:1fr}#log{padding:12px 3%}.b{max-width:90%}}
 </style></head><body>
 <header class="app"><div class="logo">VERA</div><div class="brand"><b>Vera by magicpin</b><span>AI assistant for local merchants on WhatsApp — live demo</span></div>
-<div class="nav" id="nav"><button data-m="chat" class="on">Live chat</button><button data-m="tests">Judge tests</button><button data-m="week">Weekly plan</button></div>
+<div class="nav" id="nav"><button data-m="chat" class="on">Live chat</button><button data-m="tests">Judge tests</button><button data-m="week">Weekly plan</button><button data-m="custom">Try your own</button></div>
 <div class="sp"></div><select id="pick"></select>
 <select id="lang" title="Message language"><option value="auto">🌐 Auto (from profile)</option><option value="en">English</option><option value="hi-en">Hinglish</option><option value="hi">हिन्दी</option></select></header>
 <div class="shell" id="shell">
@@ -573,11 +792,51 @@ function side(){const el=$('#side'),pk=$('#pick');let h='',opts='<option value="
   $('#q').oninput=draw;draw();SC.forEach(x=>opts+=`<option value="${x.id}">${x.id} · ${esc(x.merchant)} — ${esc(x.kind)}</option>`)}
  else if(MODE==='tests'){h='<div class="gh">What the judge runs</div>'+TESTS.map(t=>`<div class="row" data-t="${t[0]}"><div class="ra" style="background:${color(t[1])}">🧪</div><div class="tx"><b>${t[1]}</b><span>${t[2]}</span></div><span class="pass" id="res_${t[0]}"></span></div>`).join('');
   el.innerHTML=h;document.querySelectorAll('.row').forEach(n=>n.onclick=()=>n.dataset.t==='inject'?runInject():runTest(n.dataset.t));TESTS.forEach(t=>opts+=`<option value="${t[0]}">${t[1]}</option>`)}
+ else if(MODE==='custom'){customForm(el)}
  else{const seen=new Set();const ms=SC.filter(x=>x.audience==='merchant'&&!seen.has(x.merchant_id)&&seen.add(x.merchant_id));
   el.innerHTML='<div class="gh">Pick a merchant</div>'+ms.map(x=>`<div class="row" data-m="${x.merchant_id}"><div class="ra" style="background:${color(x.merchant)}">${ini(x.merchant)}</div><div class="tx"><b>${esc(x.merchant)}</b><span>${esc(x.category)}</span></div></div>`).join('');
   document.querySelectorAll('.row').forEach(n=>n.onclick=()=>week(SC.find(x=>x.merchant_id===n.dataset.m)));ms.forEach(x=>opts+=`<option value="${x.merchant_id}">${esc(x.merchant)}</option>`)}
- pk.innerHTML=opts}
+ pk.innerHTML=opts;pk.style.display=MODE==='custom'?'none':''}
 $('#pick').onchange=e=>{const v=e.target.value;if(!v)return;if(MODE==='chat')start(SC.find(x=>x.id===v));else if(MODE==='tests')(v==='inject'?runInject():runTest(v));else week(SC.find(x=>x.merchant_id===v))};
+
+// ---------- try your own scenario
+let CT=null;
+async function customForm(el){if(!CT)CT=await (await fetch('/demo/api/custom/templates')).json();
+ const cats=CT.categories.map(c=>`<option value="${c}">${c[0].toUpperCase()+c.slice(1)}</option>`).join('');
+ const tpls=CT.templates.map(t=>`<option value="${t.id}">${esc(t.label)}${t.audience==='customer'?' (to a customer)':''}</option>`).join('');
+ el.innerHTML=`<form class="form" id="cf"><p class="hint">Make up any business and any situation. Vera's agents write the message live from exactly this data.</p>
+ <h5>The business</h5>
+ <label>Category<select name="category">${cats}</select></label>
+ <div class="two"><label>Business name<input name="name" maxlength="60" required></label><label>Owner's first name<input name="owner" maxlength="30" required></label></div>
+ <div class="two"><label>City<input name="city" maxlength="40"></label><label>Locality<input name="locality" maxlength="40"></label></div>
+ <div class="three"><label>Views (30 days)<input name="views" type="number" min="0" value="2400"></label><label>Calls (30 days)<input name="calls" type="number" min="0" value="24"></label><label>CTR %<input name="ctr" type="number" min="0" max="100" step="0.1" value="3"></label></div>
+ <label>Active offer (optional)<input name="offer" maxlength="80"></label>
+ <label>Language<select name="language"><option value="hi-en">Hinglish</option><option value="en">English</option><option value="hi">Hindi</option></select></label>
+ <h5>What happened today</h5>
+ <label>Situation<select name="template">${tpls}</select></label><div id="cfields" style="display:grid;gap:9px"></div>
+ <button class="go" type="submit">Write Vera's message</button></form>`;
+ const f=$('#cf'),cat=()=>f.category.value;
+ const fillBiz=()=>{const d=CT.defaults[cat()]||{};['name','owner','city','locality','offer'].forEach(k=>f[k].value=d[k]||'')};
+ const fillFields=()=>{const t=CT.templates.find(x=>x.id===f.template.value),o=(CT.field_defaults[cat()]||{})[t.id]||{};
+  $('#cfields').innerHTML=t.fields.map(x=>{const v=o[x.name]??x.default;
+   if(x.type.startsWith('select:'))return `<label>${esc(x.label)}<select name="f_${x.name}">${x.type.slice(7).split(',').map(y=>`<option${y===v?' selected':''}>${y}</option>`).join('')}</select></label>`;
+   if(x.type==='checkbox')return `<label class="ck"><input type="checkbox" name="f_${x.name}"${v==='1'?' checked':''}> ${esc(x.label)}</label>`;
+   return `<label>${esc(x.label)}<input name="f_${x.name}" type="${x.type}" value="${esc(v)}"${x.type==='number'?' step="any"':''}></label>`}).join('')};
+ f.category.onchange=()=>{fillBiz();fillFields()};f.template.onchange=fillFields;fillBiz();fillFields();
+ f.onsubmit=e=>{e.preventDefault();runCustom(f)}}
+async function runCustom(f){const t=CT.templates.find(x=>x.id===f.template.value);const fields={};
+ t.fields.forEach(x=>{const el=f['f_'+x.name];fields[x.name]=x.type==='checkbox'?(el.checked?'1':'0'):el.value});
+ const body={category:f.category.value,name:f.name.value,owner:f.owner.value,city:f.city.value,locality:f.locality.value,views:f.views.value,calls:f.calls.value,ctr:f.ctr.value,offer:f.offer.value,language:f.language.value,template:t.id,fields};
+ const btn=f.querySelector('.go');btn.disabled=true;btn.textContent='Writing…';$('#log').innerHTML='';drawer(false);
+ const who=t.audience==='customer'?fields.customer_name:body.owner;
+ cur={audience:t.audience,to:who};header(t.audience==='customer'?`to ${who} · on behalf of ${body.name}`:`to ${body.name} · ${body.category}`,true);
+ chip('Your scenario');chip(esc(t.label)+' · '+esc(body.name),'sys');chip('Writing…');
+ try{const r=await post('/demo/api/custom',body);$('#log').lastChild.remove();sid=r.session_id;LAST=r;
+  if(r.consent_blocked)chip('Vera did not message this customer — no consent to contact them','sys');
+  vera(r,{first:true});input(true,`Reply as ${who||'the owner'}…`);insights();
+  $('#drawer').insertAdjacentHTML('beforeend',`<div class="sec"><h4>What Vera received</h4><details class="ctx"><summary>Show the exact context built from your form</summary><pre>${esc(JSON.stringify(r.context_sent,null,1))}</pre></details></div>`)}
+ catch(e){chip('Something went wrong — try again','sys')}
+ finally{btn.disabled=false;btn.textContent="Write Vera's message";if(innerWidth<=900)$('#log').scrollIntoView({behavior:'smooth'})}}
 
 // ---------- views
 function empty(){cur=null;sid=null;header('Pick a merchant to start',false);drawer(false);input(false,'Pick a merchant first…');
@@ -620,8 +879,10 @@ async function week(x){if(!x)return;MODE='week';side();sid=null;input(false,'Wee
  $('#drawer').innerHTML=`<div class="dh"><b>📅 Why a portfolio</b><button onclick="drawer(false)">×</button></div><div class="sec"><p>Reminders like renewals are rare. Engaging a merchant 3–5× a week needs knowledge- and curiosity-led conversations: research, trends, events, asks. Each one here is fact-checked.</p></div>`;drawer(true)}
 
 // ---------- wiring
-document.querySelectorAll('#nav button').forEach(b=>b.onclick=()=>{MODE=b.dataset.m;document.querySelectorAll('#nav button').forEach(x=>x.classList.toggle('on',x===b));side();
- if(MODE==='chat')empty();else{sid=null;drawer(false);header(MODE==='tests'?'Pick a judge test on the left':'Pick a merchant on the left',false);input(false,'Read-only view');
+document.querySelectorAll('#nav button').forEach(b=>b.onclick=()=>{MODE=b.dataset.m;document.querySelectorAll('#nav button').forEach(x=>x.classList.toggle('on',x===b));$('#shell').classList.toggle('custom',MODE==='custom');side();
+ if(MODE==='chat')empty();else if(MODE==='custom'){sid=null;cur=null;drawer(false);header('Your own scenario',false);input(false,'Fill in the form, then reply here');
+  $('#log').innerHTML=`<div class="empty"><h2>Try your own scenario</h2><p>Pick a category, make up a business and choose what happened today — rain, a festival, a competitor, a drop in calls, a new review theme, a customer due for a visit. Vera writes the message live, and you can reply to it like the owner.</p><p style="font-size:13px">Nothing here is pre-written: the same agents that handle the official test cases run on your data.</p></div>`}
+ else{sid=null;drawer(false);header(MODE==='tests'?'Pick a judge test on the left':'Pick a merchant on the left',false);input(false,'Read-only view');
   $('#log').innerHTML=`<div class="empty"><h2>${MODE==='tests'?'Judge tests':'Weekly plan'}</h2><p>${MODE==='tests'?'Run the exact scenarios magicpin\'s judge uses: auto-replies, intent switches, hostile replies, curveballs, and new context arriving mid-test.':'See five different conversations Vera would have with one merchant this week.'}</p></div>`}});
 $('#lang').onchange=e=>{LANG=e.target.value;if(MODE==='chat'&&cur)start(cur)};
 $('#insBtn').onclick=()=>drawer(!$('#shell').classList.contains('drawer'));$('#dealsBtn').onclick=deals;
