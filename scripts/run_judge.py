@@ -1,4 +1,4 @@
-"""Run magicpin's judge_simulator.py against a bot, reading the official dataset from dataset/expanded.
+"""Run magicpin's judge_simulator.py against a bot, reading dataset/seed (the layout the official simulator uses; DATASET_DIR=dataset/expanded for the 100-trigger set).
 
 Real LLM scoring (key stays in your shell, never in a file):
     export JUDGE_PROVIDER=gemini          # gemini | groq | xai (Grok) | openai | anthropic | openrouter | ollama
@@ -28,7 +28,8 @@ from vera.dataset import load_dataset  # noqa: E402
 
 bot_url = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("BOT_URL", "http://localhost:8080")
 scenario = sys.argv[2] if len(sys.argv) > 2 else "phase2_short"
-data_dir = os.environ.get("DATASET_DIR", str(ROOT / "dataset" / "expanded"))
+# default = dataset/seed: the same layout (categories/ + *_seed.json) the official judge_simulator.py reads from ./dataset
+data_dir = os.environ.get("DATASET_DIR") or str(ROOT / "dataset" / "seed")
 
 
 class Loader(js.DatasetLoader):
@@ -70,7 +71,8 @@ if provider == "grok":
     provider = "xai"
 key = os.environ.get("JUDGE_API_KEY", "")
 if provider and (key or provider == "ollama"):
-    js.LLM_PROVIDER, js.LLM_API_KEY, js.LLM_MODEL = provider, key, os.environ.get("JUDGE_MODEL", "")
+    model = os.environ.get("JUDGE_MODEL", "") or ("llama-3.3-70b-versatile" if provider == "groq" else "")  # simulator's Groq default is retired
+    js.LLM_PROVIDER, js.LLM_API_KEY, js.LLM_MODEL = provider, key, model
     llm = XAIProvider(key, js.LLM_MODEL) if provider == "xai" else js.create_provider()
     try:
         llm.complete("Say ready.", "You are a test assistant.")
