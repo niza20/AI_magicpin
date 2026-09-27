@@ -438,7 +438,7 @@ mark{border-radius:3px;padding:0 1px;color:inherit}mark.merchant{background:rgba
 @media (max-width:900px){.shell,.shell.drawer{grid-template-columns:1fr}#side{display:none}#pick{display:block;max-width:60vw}#drawer{position:fixed;inset:59px 0 0 12%;z-index:5;box-shadow:-4px 0 18px rgba(0,0,0,.2)}.steps{grid-template-columns:1fr}#log{padding:12px 3%}.b{max-width:90%}}
 </style></head><body>
 <header class="app"><div class="logo">VERA</div><div class="brand"><b>Vera by magicpin</b><span>AI assistant for local merchants on WhatsApp — live demo</span></div>
-<div class="nav" id="nav"><button data-m="chat" class="on">💬 Live chat</button><button data-m="tests">🧪 Judge tests</button><button data-m="week">📅 Weekly plan</button></div>
+<div class="nav" id="nav"><button data-m="chat" class="on">Live chat</button><button data-m="tests">Judge tests</button><button data-m="week">Weekly plan</button></div>
 <div class="sp"></div><select id="pick"></select>
 <select id="lang" title="Message language"><option value="auto">🌐 Auto (from profile)</option><option value="en">English</option><option value="hi-en">Hinglish</option><option value="hi">हिन्दी</option></select></header>
 <div class="shell" id="shell">
@@ -545,7 +545,7 @@ async function week(x){if(!x)return;MODE='week';side();sid=null;input(false,'Wee
 // ---------- wiring
 document.querySelectorAll('#nav button').forEach(b=>b.onclick=()=>{MODE=b.dataset.m;document.querySelectorAll('#nav button').forEach(x=>x.classList.toggle('on',x===b));side();
  if(MODE==='chat')empty();else{sid=null;drawer(false);header(MODE==='tests'?'Pick a judge test on the left':'Pick a merchant on the left',false);input(false,'Read-only view');
-  $('#log').innerHTML=`<div class="empty"><h2>${MODE==='tests'?'🧪 Judge tests':'📅 Weekly plan'}</h2><p>${MODE==='tests'?'Run the exact scenarios magicpin\'s judge uses: auto-replies, intent switches, hostile replies, curveballs, and new context arriving mid-test.':'See five different conversations Vera would have with one merchant this week.'}</p></div>`}});
+  $('#log').innerHTML=`<div class="empty"><h2>${MODE==='tests'?'Judge tests':'Weekly plan'}</h2><p>${MODE==='tests'?'Run the exact scenarios magicpin\'s judge uses: auto-replies, intent switches, hostile replies, curveballs, and new context arriving mid-test.':'See five different conversations Vera would have with one merchant this week.'}</p></div>`}});
 $('#lang').onchange=e=>{LANG=e.target.value;if(MODE==='chat'&&cur)start(cur)};
 $('#insBtn').onclick=()=>drawer(!$('#shell').classList.contains('drawer'));$('#dealsBtn').onclick=deals;
 $('#f').onsubmit=e=>{e.preventDefault();send($('#in').value)};
