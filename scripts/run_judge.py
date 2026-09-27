@@ -10,6 +10,7 @@ Without JUDGE_API_KEY it uses a stub scorer (conversation tests still run; score
 Optional: JUDGE_DELAY=3 (seconds between judge calls), JUDGE_MAX=15 (score only the first N messages).
 Scenarios: all | warmup | phase2_short | auto_reply_hell | intent_transition | hostile | full_evaluation
 """
+import json
 import os
 import sys
 from pathlib import Path
@@ -130,9 +131,55 @@ if limit:
     def _limited(self, *a, **k):
         _count["n"] += 1
         if _count["n"] > limit:
-            return js.ScoreResult(hint="skipped (JUDGE_MAX reached)")
+            return js.ScoreResult(hint=SKIPPED)
         return _orig(self, *a, **k)
     js.LLMScorer.score = _limited
+
+SKIPPED = "skipped (JUDGE_MAX reached)"
+_orig_summary = js.JudgeSimulator._final_summary
+
+
+def _real_summary(self):
+    """Average only messages the judge actually scored (JUDGE_MAX-skipped ones are not zeros)."""
+    self.all_scores = [s for s in self.all_scores if s.hint != SKIPPED]
+    _orig_summary(self)
+    if not self.all_scores:
+        return
+    dims = [("specificity", "specificity_reason"), ("category_fit", "category_fit_reason"),
+            ("merchant_fit", "merchant_fit_reason"), ("decision_quality", "decision_quality_reason"),
+            ("engagement_compulsion", "engagement_reason")]
+    n = len(self.all_scores)
+    print(f"\nExact averages over {n} judged messages (the simulator rounds down):")
+    for d, _ in dims:
+        print(f"  {d:<22} {sum(getattr(s, d) for s in self.all_scores) / n:.1f}")
+    print(f"  {'TOTAL':<22} {sum(s.total for s in self.all_scores) / n:.1f}/50")
+    rows = [{"body": b, "total": s.total, **{d: getattr(s, d) for d, _ in dims},
+             "reasons": {d: getattr(s, r) for d, r in dims}, "penalties": s.penalty_reasons, "hint": s.hint}
+            for s, b in zip(self.all_scores, _bodies)]
+    with open("judge_scores.json", "w") as f:
+        json.dump(rows, f, ensure_ascii=False, indent=1)
+    print("Per-message scores + judge reasons saved to judge_scores.json")
+    low = sorted(rows, key=lambda r: r["total"])[:3]
+    for r in low:
+        print(f"\n  {r['total']}/50  {r['body'][:90]!r}")
+        for d, _ in dims:
+            if r[d] < 7 and r["reasons"][d]:
+                print(f"    {d}={r[d]}: {r['reasons'][d][:200]}")
+
+
+_bodies = []
+_orig_score_msg = js.LLMScorer.score
+
+
+def _capture(self, action, *a, **k):
+    res = _orig_score_msg(self, action, *a, **k)
+    if res.hint != SKIPPED:
+        _bodies.append(action.get("body", ""))
+    return res
+
+
+js.LLMScorer.score = _capture
+js.JudgeSimulator._final_summary = _real_summary
 
 if not isinstance(llm, StubLLM):
     llm = Throttled(llm, float(os.environ.get("JUDGE_DELAY", "3")))
