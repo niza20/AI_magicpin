@@ -320,34 +320,38 @@ def r_knowledge(b: Brief) -> Parts:
 
 
 def r_regulation(b: Brief) -> Parts:
-    """Opener uses only what the merchant (and a judge) can check: the rule's title, the payload deadline and the
-    merchant's own listing numbers. The circular's fine print (dates, dose values) goes into the checklist after YES."""
-    title, eff = b.A("title"), b.A("effective")
-    name = b.P("name") or f"your {b.prof.noun_singular}"
+    """Opener uses only what the merchant (and a judge) can check: the rule's title, the payload deadline (and days
+    left on it), the merchant's own listing numbers and signals. The circular's fine print (dates, dose values) goes
+    into the checklist after YES."""
+    title, eff, days = b.A("title"), b.A("effective"), b.A("days_left")
+    loc = b.P("locality")
+    noun = "clinic" if b.prof.slug == "dentists" else b.prof.noun_singular
+    where = f"your {loc} {noun}" if loc else (b.P("name") or f"your {noun}")
+    where_hi = f"aapke {loc} {noun}" if loc else (b.P("name") or f"aapke {noun}")
     in_title = eff and (str(b.Araw("effective") or "")[:10] in (title or ""))
+    when_en = (f" — {days} left" if days else "")
+    when_hi = (f" — sirf {days.replace('days', 'din')} bache hain" if days else "")
     if title:
-        hook = b.t(f"{b.sal()}, a compliance deadline for {name}: {_q(title)}" + (f" — deadline {eff}." if eff and not in_title else "."),
-                   f"{b.sal()}, {name} ke liye ek compliance deadline: {_q(title)}" + (f" — deadline {eff}." if eff and not in_title else "."))
+        hook = b.t(f"{b.sal()}, compliance deadline for {where}: {_q(title)}" + (f" ({eff})" if eff and not in_title else "") + f"{when_en}.",
+                   f"{b.sal()}, {where_hi} ke liye compliance deadline: {_q(title)}" + (f" ({eff})" if eff and not in_title else "") + f"{when_hi}.")
     else:
-        hook = b.t(f"{b.sal()}, a compliance deadline for {name}" + (f" on {eff}." if eff else "."),
-                   f"{b.sal()}, {name} ke liye ek compliance deadline" + (f": {eff}." if eff else "."))
+        hook = b.t(f"{b.sal()}, a compliance deadline for {where}" + (f" on {eff}" if eff else "") + f"{when_en}.",
+                   f"{b.sal()}, {where_hi} ke liye compliance deadline" + (f": {eff}" if eff else "") + f"{when_hi}.")
     anchor = []
     act = _short(b.A("actionable"), 110)
     if act:
         anchor.append(b.t(f"What to do: {act[0].lower() + act[1:]}.", f"Kya karna hai: {act[0].lower() + act[1:]}."))
-    dl = f" before {eff}" if eff else " before the deadline"
-    dl_hi = f" {eff} se pehle" if eff else " deadline se pehle"
+    v, c, w, ctr, stale = b.P("views"), b.P("calls"), b.P("window"), b.P("ctr"), b.P("stale_days")
+    if v and c and w:
+        extra_en = (f", CTR {ctr}" if ctr else "") + (f", last post {stale} days ago" if stale else "")
+        extra_hi = (f", CTR {ctr}" if ctr else "") + (f", last post {stale} din pehle" if stale else "")
+        anchor.append(b.t(f"Your listing: {v} views but only {c} calls in {w}{extra_en} — a safety-compliant {noun} post once this is done turns that trust into calls.",
+                          f"Listing: {w.replace('days', 'din')} mein {v} views par sirf {c} calls{extra_hi} — iske baad safety-compliant {noun} post wahi trust calls mein badlega."))
+    dl, dl_hi = (f" before {eff}", f" {eff} se pehle") if eff else (" before the deadline", " deadline se pehle")
     levers = {"loss_aversion": b.t(f"Better to be ready{dl} than to fix it after an inspection.",
                                    f"Inspection ke baad fix karne se better hai{dl_hi} ready rehna.")}
-    v, c, w = b.P("views"), b.P("calls"), b.P("window")
-    if v and c and w:
-        noun = "clinic" if b.prof.slug == "dentists" else b.prof.noun_singular
-        anchor.append(b.t(f"Your listing: {v} views, only {c} calls in {w} — a safety-compliant {noun} post after this earns that trust.",
-                          f"Listing: {w.replace('days', 'din')} mein {v} views, sirf {c} calls — iske baad safety-compliant {noun} post wahi trust banayega."))
-    else:
-        levers["curiosity"] = b.t("It's a short read.", "Chhota sa read hai.")
-    ctas = {"effort": b.t(f"Want me to turn the circular into a 1-page checklist for {name} (exact limits, what to change, who owns it)? Reply YES.",
-                          f"Main circular ko {name} ke liye 1-page checklist bana doon (exact limits, kya badalna hai, kaun sambhalega)? Reply YES."),
+    ctas = {"effort": b.t(f"Want a 1-page checklist (exact limits, what to change, who owns it)? Reply YES.",
+                          f"1-page checklist bana doon (exact limits, kya badalna hai, kaun sambhalega)? Reply YES."),
             "curiosity": b.t("Want the key points summarised?", "Key points summary bhej doon?")}
     return Parts(hook, anchor, levers, ctas)
 
@@ -404,22 +408,26 @@ def _perf(b: Brief, up: bool) -> Parts:
         anchor.append(b.t(f"That's {cur} vs a usual {base}.", f"Yani {cur}, jabki normal {base} rehta hai."))
     elif base and not cur:
         anchor.append(b.t(f"(Baseline: {base} {metric}.)", f"(Baseline: {base} {metric}.)"))
-    elif b.A("metric_30d") and b.P("window"):
+    elif b.A("metric_30d") and b.P("window") and not (b.P("views") and b.P("calls")):
         anchor.append(b.t(f"({b.A('metric_30d')} {metric} in the last {b.P('window')}.)",
                           f"(Pichhle {b.P('window').replace('days', 'din')} mein {b.A('metric_30d')} {metric}.)"))
-    metric_raw = str(b.Araw("metric") or "").lower()
-    for other in ("views", "calls", "directions"):
-        od = b.pz.get(f"{other}_delta")
-        if other != metric_raw and od and ((od["signed"] < 0) != up) and abs(od["signed"]) >= 0.05:
-            anchor.append(b.t(f"{other.capitalize()} are {'up' if up else 'down'} {b.P(other + '_delta')} too.",
-                              f"{other.capitalize()} bhi {b.P(other + '_delta')} {'upar' if up else 'neeche'} hain."))
-            break
+    # the merchant's own 30-day totals (views / calls / CTR) — the numbers the merchant and a judge can both see
+    v, c, w, ctr = b.P("views"), b.P("calls"), b.P("window"), b.P("ctr")
+    if v and c and w:
+        anchor.append(b.t(f"Last {w}: {v} views, {c} calls" + (f", CTR {ctr}" if ctr else "") + ".",
+                          f"Pichhle {w.replace('days', 'din')}: {v} views, {c} calls" + (f", CTR {ctr}" if ctr else "") + "."))
     levers = {}
-    if b.P("ctr_gap"):
-        levers["social_proof"] = b.t(f"Your CTR is {b.P('ctr')} vs {b.P('peer_ctr')} for {b.prof.peer_label}.",
-                                     f"Aapka CTR {b.P('ctr')} hai, jabki {b.prof.peer_label} ka {b.P('peer_ctr')}.")
-        levers["loss_aversion"] = b.t(f"At {b.P('ctr')} vs the {b.P('peer_ctr')} peer benchmark, searchers are slipping to others.",
-                                      f"{b.P('ctr')} vs {b.P('peer_ctr')} peer benchmark — log search karke dusron pe ja rahe hain.")
+    if not up:
+        loc = b.P("locality")
+        peers = f"{b.prof.slug} near {loc}" if loc else b.prof.slug
+        peers_hi = f"{loc} ke aas-paas ke dusre {b.prof.slug}" if loc else f"dusre {b.prof.slug}"
+        peers_en = b.t(f"Other {peers} that post fresh updates weekly are the ones picking up these searches.",
+                       f"Jo {peers_hi} har hafte fresh update daalte hain, yeh searches unhi ko mil rahi hain.")
+        levers["social_proof"] = peers_en
+        levers["loss_aversion"] = peers_en
+    if b.P("ctr_below_signal") and ctr and not up:
+        levers["loss_aversion"] = b.t(f"A {ctr} CTR is below the peer median — searchers are slipping to others.",
+                                      f"{ctr} CTR peer median se neeche hai — log search karke dusron pe ja rahe hain.")
     if b.P("stale_days") and not up:
         levers.setdefault("loss_aversion", b.t(f"Your last Google post was {b.P('stale_days')} days ago — fresh posts are the quickest lever.",
                                                f"Aapki last Google post {b.P('stale_days')} din purani hai — fresh post sabse quick lever hai."))
@@ -431,8 +439,13 @@ def _perf(b: Brief, up: bool) -> Parts:
                                     f"Iski wajah shayad aapka {b.A('driver')} hai — yeh kaam kar raha hai, toh isi ko aage badhayein.")
         levers["specificity"] = levers["reciprocity"]
     if b.A("season_note") and not up:
-        levers["social_proof"] = b.t(f"This matches the expected seasonal pattern ({b.A('season_note')}) — peers dip too, so the goal is holding share, not panicking.",
-                                     f"Yeh expected seasonal pattern hai ({b.A('season_note')}) — peers bhi dip karte hain, isliye goal share bachaana hai, panic nahi.")
+        note = b.A("season_note")
+        mm = re.search(r"(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*", note, re.I)
+        span = f"{mm.group(1).capitalize()}–{mm.group(2).capitalize()}" if mm else ""
+        if "resolution" in note.lower():
+            note = f"the {span + ' ' if span else ''}lull after the New-Year-resolution rush".strip()
+        levers["social_proof"] = b.t(f"This matches the expected seasonal pattern ({note}) — peers dip too, so the goal is holding share, not panicking.",
+                                     f"Yeh expected seasonal pattern hai ({note}) — peers bhi dip karte hain, isliye goal share bachaana hai, panic nahi.")
     o_en, o_hi = b.offer_phrase()
     small = abs(float((b.ta.anchor.get("delta") or {}).get("signed") or 0)) < 0.10
     if up and small:
@@ -1092,10 +1105,9 @@ def r_supply(b: Brief) -> Parts:
     hook = b.t(f"{b.sal()}, batch alert: {mol}" + (f" ({mfr})" if mfr else "") + (f" batches {batches} are flagged." if batches else " is flagged."),
                f"{b.sal()}, batch alert: {mol}" + (f" ({mfr})" if mfr else "") + (f" ke batches {batches} flag hue hain." if batches else " flag hua hai."))
     anchor = []
-    if b.A("title"):
-        anchor.append(f"{_q(b.A('title'))}" + (f" — {b.A('source')}." if b.A("source") else "."))
-    if b.A("actionable"):
-        anchor.append(b.t(f"Action: {_short(b.A('actionable'), 110)}.", f"Action: {_short(b.A('actionable'), 110)}."))
+    # the payload (molecule, manufacturer, batch numbers) is the verifiable part — the digest headline is not repeated
+    anchor.append(b.t("Action today: pull those batches from the shelf and tell repeat customers on this medicine to check their strip.",
+                      "Aaj ka action: yeh batches shelf se hatayein aur is dawai ke repeat customers ko strip check karne ko bolein."))
     levers = {"loss_aversion": b.t("Pulling them from the shelf today avoids a customer walking out with an affected strip.",
                                    "Aaj hi shelf se hataane se koi customer affected strip ke saath nahi jayega.")}
     ctas = _post_cta(b, f"draft a WhatsApp for customers who recently bought {mol} asking them to check their batch",

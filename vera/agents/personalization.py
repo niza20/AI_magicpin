@@ -128,6 +128,8 @@ class PersonalizationAgent(Agent):
             m = re.search(r"stale_posts?[:_ ](\d+)", s_low)
             if m:
                 put("stale_days", int(m.group(1)), f"merchant.signals[{i}]", m.group(1))
+            if re.search(r"ctr_below_peer", s_low):
+                put("ctr_below_signal", True, f"merchant.signals[{i}]", "below the peer median")
             seg = ta.anchor.get("segment", {}).get("value")
             if seg and _overlap(str(seg), s_low):
                 put("segment_match", s, f"merchant.signals[{i}]", humanize(str(seg)).replace("adults", "adult"))

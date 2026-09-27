@@ -122,6 +122,12 @@ class TriggerAnalyst(Agent):
         if now and exp:
             n, e = parse_datetime(now), parse_datetime(exp)
             expired = bool(n and e and n > e)
+        eff = anchor.get("effective")
+        if now and eff and fam == "regulation":
+            n, d = parse_datetime(now), parse_datetime(str(eff.get("value"))[:10] + "T00:00:00Z")
+            if n and d and 0 < (d - n).days <= 365:          # days to the payload deadline, from the judge's own clock
+                days = (d - n).days
+                self._derive_put(anchor, "days_left", days, f"{days} days", [eff.get("path") or "trigger.payload.deadline_iso"])
         why = self._why_now(fam, kind, anchor)
         ta = TriggerAnalysis(trigger_type=kind, family=fam, urgency=max(1, min(5, urgency)), why_now=why,
                              primary_goal=goal, recommended_action=action, expiration=exp,
