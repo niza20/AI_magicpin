@@ -12,3 +12,8 @@ services:
         value: 3.11.9
       - key: VERA_LLM
         value: "off"          # set to "auto" and add ANTHROPIC_API_KEY to enable the LLM drafting pass
+      # Demo chat history (SQLite). The free plan's disk resets on every restart/deploy, so saved chats last until
+      # then. For permanent history: switch to a paid plan, add a disk mounted at /var/data, and set
+      # DEMO_DB=/var/data/demo_chats.db
+      - key: DEMO_DB
+        value: data/demo_chats.db

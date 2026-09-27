@@ -5,3 +5,4 @@ __pycache__/
 *.log
 llm_cache.json
 judge_scores.json
+data/

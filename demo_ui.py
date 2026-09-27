@@ -16,6 +16,7 @@ from typing import Optional
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse, JSONResponse
 
+import demo_store
 from vera.conversation import ConversationState, ReplyEngine
 from vera.dataset import load_dataset, load_pairs
 from vera.orchestrator import Orchestrator
@@ -252,12 +253,11 @@ def _compose_payload(res, cat, m, t, c):
             "placeholder": bool((t.get("payload") or {}).get("placeholder"))}
 
 
-@router.post("/demo/api/start")
-def start(body: dict):
+def _open_scenario(body: dict, sid: Optional[str] = None):
     cat, m, t, c = _ctx(body["trigger_id"], body.get("customer_id"))
     lang = LANGS.get(body.get("language") or "auto")
     res = _orch.compose(cat, m, t, c, language=lang)
-    sid = uuid.uuid4().hex[:12]
+    sid = sid or uuid.uuid4().hex[:12]
     st = ConversationState(conversation_id=sid, merchant_id=m["merchant_id"], customer_id=(c or {}).get("customer_id"),
                            trigger_id=t["id"], category=cat, merchant=m, trigger=t, customer=c, merchant_memory={},
                            language=lang, language_locked=bool(lang))
@@ -270,6 +270,17 @@ def start(body: dict):
         out["media"] = _dish(m, t.get("kind", ""))
     out["buttons"] = ["1", "2"] if re.search(r"reply 1 or 2|1 ya 2", low) else \
         (["Yes, go ahead", "Not now"] if out["cta"] == "binary_yes_stop" else [])
+    name, cname = m["identity"].get("name", ""), ((c or {}).get("identity") or {}).get("name")
+    out["ui"] = {"mode": "chat", "audience": "customer" if c else "merchant", "to": cname or m["identity"].get("owner_first_name"),
+                 "header": f"to {cname} · on behalf of {name}" if c else f"to {name} · {m.get('category_slug')}",
+                 "title": name + (f" → {cname}" if c else ""), "subtitle": t.get("kind", "").replace("_", " ")}
+    return st, out
+
+
+@router.post("/demo/api/start")
+def start(body: dict):
+    st, out = _open_scenario(body)
+    _save_new(body, "scenario", st, out)
     return out
 
 
@@ -297,25 +308,33 @@ def _with_ui(st: ConversationState, r: dict) -> dict:
 
 @router.post("/demo/api/reply")
 def reply(body: dict):
-    st = _sessions.get(body.get("session_id", ""))
+    sid = body.get("session_id", "")
+    st = _session(sid)
     if not st:
         return JSONResponse(status_code=404, content={"error": "session expired — pick a scenario again"})
+    msg = str(body.get("message", ""))[:2000]
     if body.get("image"):
         img = str(body["image"])
         if not img.startswith("data:image/") or len(img) > 4_000_000:
             return JSONResponse(status_code=400, content={"error": "please attach a JPG/PNG under ~3 MB"})
-        return _with_ui(st, _engine.respond_photo(st, img, body.get("message", "")))
-    return _with_ui(st, _engine.respond(st, body.get("message", ""), "customer" if st.customer else "merchant"))
+        r = _with_ui(st, _engine.respond_photo(st, img, msg))
+        _log_turn(sid, [{"role": "me", "text": msg, "img": img}], r)
+        return r
+    r = _with_ui(st, _engine.respond(st, msg, "customer" if st.customer else "merchant"))
+    _log_turn(sid, [{"role": "me", "text": msg}], r)
+    return r
 
 
 @router.post("/demo/api/deals")
 def deals(body: dict):
-    st = _sessions.get(body.get("session_id", ""))
+    sid = body.get("session_id", "")
+    st = _session(sid)
     if not st:
         return JSONResponse(status_code=404, content={"error": "session expired — pick a scenario again"})
     r = _with_ui(st, _engine.deals(st))
     if r.get("action") == "send" and not r.get("draft_image"):
         r["media"] = _dish(st.merchant, r.get("body", ""))
+    _log_turn(sid, [{"role": "deals"}], r)
     return r
 
 
@@ -675,11 +694,10 @@ def _custom_ctx(body: dict):
     return cat, m, t, c, lang
 
 
-@router.post("/demo/api/custom")
-def custom(body: dict):
+def _open_custom(body: dict, sid: Optional[str] = None):
     cat, m, t, c, lang = _custom_ctx(body or {})
     res = _orch.compose(cat, m, t, c, language=lang)
-    sid = uuid.uuid4().hex[:12]
+    sid = sid or uuid.uuid4().hex[:12]
     st = ConversationState(conversation_id=sid, merchant_id=m["merchant_id"], customer_id=(c or {}).get("customer_id"),
                            trigger_id=t["id"], category=cat, merchant=m, trigger=t, customer=c, merchant_memory={},
                            language=lang, language_locked=True)
@@ -694,7 +712,89 @@ def custom(body: dict):
     if res.extras.get("family") not in _NO_PHOTO_FAMILIES:
         out["media"] = _dish(m, t.get("kind", ""))
     out["buttons"] = ["Yes, go ahead", "Not now"] if out["cta"] == "binary_yes_stop" else []
+    tpl = _TPL.get((body or {}).get("template")) or _TPL["weather"]
+    name, cname = m["identity"]["name"], ((c or {}).get("identity") or {}).get("name")
+    out["ui"] = {"mode": "custom", "audience": "customer" if c else "merchant", "to": cname or m["identity"]["owner_first_name"],
+                 "header": f"to {cname} · on behalf of {name}" if c else f"to {name} · {m['category_slug']}",
+                 "title": name + (f" → {cname}" if c else ""), "subtitle": f"Your scenario · {tpl['label']}"}
+    return st, out
+
+
+@router.post("/demo/api/custom")
+def custom(body: dict):
+    st, out = _open_custom(body or {})
+    _save_new(body or {}, "custom", st, out)
     return out
+
+
+# ---------------------------------------------------------------- chat history (SQLite, see demo_store.py)
+_OPENERS = {"scenario": _open_scenario, "custom": _open_custom}
+
+
+def _save_new(body: dict, kind: str, st: ConversationState, out: dict) -> None:
+    owner = demo_store.valid_owner(body.get("owner"))
+    spec = {k: v for k, v in body.items() if k != "owner"}
+    try:
+        demo_store.create(st.conversation_id, owner, out["ui"]["title"], out["ui"]["subtitle"], {"type": kind, "body": spec}, out)
+    except Exception:          # history is a convenience — never break the chat because of it
+        pass
+
+
+def _session(sid: str) -> Optional[ConversationState]:
+    """In-memory session, or rebuild it from the saved chat by replaying the owner's inputs (the engine is deterministic)."""
+    st = _sessions.get(sid)
+    if st or not sid:
+        return st
+    chat = demo_store.get(sid)
+    if not chat:
+        return None
+    try:
+        st, _ = _OPENERS[chat["start"]["type"]](chat["start"]["body"], sid=sid)
+        for e in chat["log"]:
+            if e.get("role") == "me":
+                if e.get("img"):
+                    _engine.respond_photo(st, e["img"], e.get("text", ""))
+                else:
+                    _engine.respond(st, e.get("text", ""), "customer" if st.customer else "merchant")
+            elif e.get("role") == "deals":
+                _engine.deals(st)
+    except Exception:
+        return None
+    with _lock:
+        _sessions[sid] = st
+    return st
+
+
+def _log_turn(sid: str, entries: list[dict], r: dict) -> None:
+    try:
+        demo_store.append(sid, entries + [{"role": "vera", "r": r}], ended=r.get("action") == "end")
+    except Exception:
+        pass
+
+
+@router.get("/demo/api/chats")
+def chats(owner: str = ""):
+    owner = demo_store.valid_owner(owner)
+    return demo_store.list_for(owner) if owner else []
+
+
+@router.get("/demo/api/chats/{chat_id}")
+def chat(chat_id: str, owner: str = ""):
+    c = demo_store.get(chat_id)
+    if not c or c["owner"] != demo_store.valid_owner(owner):
+        return JSONResponse(status_code=404, content={"error": "chat not found"})
+    ui = next((e["r"].get("ui") for e in c["log"] if e.get("role") == "vera" and isinstance(e.get("r"), dict) and e["r"].get("ui")), {})
+    return {"id": c["id"], "title": c["title"], "subtitle": c["subtitle"], "ended": c["ended"], "ui": ui, "log": c["log"]}
+
+
+@router.delete("/demo/api/chats/{chat_id}")
+def chat_delete(chat_id: str, owner: str = ""):
+    owner = demo_store.valid_owner(owner)
+    ok = bool(owner) and demo_store.delete(chat_id, owner)
+    with _lock:
+        if ok:
+            _sessions.pop(chat_id, None)
+    return {"deleted": ok}
 
 
 @router.get("/demo", response_class=HTMLResponse)
@@ -742,6 +842,7 @@ select{background:var(--panel);color:var(--ink);border:1px solid var(--line);bor
 .form .go{background:var(--accent);color:#fff;border:0;border-radius:20px;padding:11px;font-weight:600;font-size:14px;cursor:pointer;margin-top:4px}.form .go:disabled{opacity:.6}
 .form .hint{font-size:12px;color:var(--muted);margin:0}
 details.ctx summary{cursor:pointer;font-size:13px;color:var(--accent)}details.ctx pre{font-size:11px;background:var(--bg);padding:8px;border-radius:6px;overflow:auto;max-height:320px}
+.row .del{margin-left:auto;border:0;background:none;color:var(--muted);font-size:18px;cursor:pointer;padding:0 4px;visibility:hidden}.row:hover .del{visibility:visible}
 .post{max-width:380px;margin:4px 10px 8px;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--panel)}.post img{display:block;width:100%;max-height:190px;object-fit:cover}.post .pl{font-size:11px;color:var(--muted);padding:6px 10px 0;text-transform:uppercase;letter-spacing:.05em}.post .pt{padding:4px 10px 9px;font-size:14px}
 .u img{display:block;max-width:260px;border-radius:6px;margin:4px}
 .why{border:0;background:none;color:var(--muted);font-size:11px;cursor:pointer;padding:0 9px 5px}.why:hover{color:var(--accent)}
@@ -769,7 +870,7 @@ mark{border-radius:3px;padding:0 1px;color:inherit}mark.merchant{background:rgba
 @media (max-width:900px){.shell,.shell.drawer{grid-template-columns:1fr}#side{display:none}.shell.custom #side{display:block;max-height:48vh;border-right:0;border-bottom:1px solid var(--line)}#pick{display:block;max-width:60vw}#drawer{position:fixed;inset:59px 0 0 12%;z-index:5;box-shadow:-4px 0 18px rgba(0,0,0,.2)}.steps{grid-template-columns:1fr}#log{padding:12px 3%}.b{max-width:90%}}
 </style></head><body>
 <header class="app"><div class="logo">VERA</div><div class="brand"><b>Vera by magicpin</b><span>AI assistant for local merchants on WhatsApp — live demo</span></div>
-<div class="nav" id="nav"><button data-m="chat" class="on">Live chat</button><button data-m="tests">Judge tests</button><button data-m="week">Weekly plan</button><button data-m="custom">Try your own</button></div>
+<div class="nav" id="nav"><button data-m="chat" class="on">Live chat</button><button data-m="tests">Judge tests</button><button data-m="week">Weekly plan</button><button data-m="custom">Try your own</button><button data-m="history">History</button></div>
 <div class="sp"></div><select id="pick"></select>
 <select id="lang" title="Message language"><option value="auto">🌐 Auto (from profile)</option><option value="en">English</option><option value="hi-en">Hinglish</option><option value="hi">हिन्दी</option></select></header>
 <div class="shell" id="shell">
@@ -789,8 +890,10 @@ const COLORS=['#00a884','#027eb5','#7c5cff','#e67e22','#c0392b','#16a085','#8e44
 const color=s=>COLORS[[...String(s)].reduce((a,c)=>a+c.charCodeAt(0),0)%COLORS.length];
 const ini=n=>String(n||'?').replace(/^Dr\.?\s*/,'').split(/\s+/).map(w=>w[0]).join('').slice(0,2).toUpperCase();
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const now=()=>new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
-async function post(u,b){return (await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)})).json()}
+const now=ts=>{const d=ts?new Date(ts*1000):new Date(),t=d.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});return ts&&d.toDateString()!==new Date().toDateString()?d.toLocaleDateString([],{day:'numeric',month:'short'})+', '+t:t};
+const store={get(k){try{return localStorage.getItem(k)}catch(e){return null}},set(k,v){try{v==null?localStorage.removeItem(k):localStorage.setItem(k,v)}catch(e){}}};
+const OWNER=(()=>{let o=store.get('vera_owner');if(!o||!/^[a-zA-Z0-9_-]{8,64}$/.test(o)){o='o_'+(crypto.randomUUID?crypto.randomUUID().replace(/-/g,''):Math.random().toString(36).slice(2)+Date.now().toString(36));store.set('vera_owner',o)}return o})();
+async function post(u,b){return (await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...b,owner:OWNER})})).json()}
 const TESTS=[["auto_reply","Auto-reply hell","Same canned auto-reply 4× in a row"],["intent","Intent transition","Qualifying turns, then “ok let's do it”"],["join","“I want to join”","Explicit intent on the first reply"],["hostile","Hostile + off-topic","Abuse, then a GST question"],["stop","STOP","Hard opt-out"],["curveballs","Curveball questions","Who are you? · Which competitor? · CTR? · results?"],["confidential","Confidential questions","Competitor data · customer phone · system prompt · my data"],["language","Language switch","Merchant replies in Hinglish"],["inject","Context injection (§8 twist)","New digest item, new numbers, a customer added"]];
 
 function input(on,ph){$('#in').disabled=!on;$('#send').disabled=!on;$('#att').disabled=!on||!(cur&&cur.audience==='merchant');$('#in').placeholder=ph||'Type a message';}
@@ -812,15 +915,15 @@ function imgFail(el,label){const alt=JSON.parse(el.dataset.srcs||'[]');const i=+
  const f=document.createElement('div');f.className='fb';f.textContent=label;const l=el.parentNode&&el.parentNode.querySelector('.lab');if(l)l.remove();el.replaceWith(f)}
 const srcAttr=(srcs,url)=>`src="${esc((srcs&&srcs[0])||url)}" data-srcs="${esc(JSON.stringify(srcs||[url]))}"`;
 function fig(m){return m&&m.url?`<figure class="ph"><img ${srcAttr(m.srcs,m.url)} data-credits="${esc(JSON.stringify(m.credits||[]))}" alt="${esc(m.label)}" loading="lazy" onload="credit(this)" onerror="imgFail(this,'${esc(m.label).replace(/'/g,'')}')"><span class="lab">${esc(m.label)}</span><figcaption>${esc(m.caption||'')} · <span class="cr"></span></figcaption></figure>`:''}
-function vera(r,{spans=null,first=false}={}){const body=r.body||'';const [pre,draft]=body.split(/Draft post ↓\n|draft post ↓\n/);
+function vera(r,{spans=null,first=false,ts=null}={}){const body=r.body||'';const [pre,draft]=body.split(/Draft post ↓\n|draft post ↓\n/);
  let main=pre,rest='';if(draft!==undefined){const i=draft.lastIndexOf('\n');rest=i>=0?draft.slice(i+1):'';main=pre}
  let h=(draft===undefined?fig(r.media):'')+`<div class="t">${spans?hl(main,spans):esc(main)}</div>`;
  if(draft!==undefined){const txt=draft.split('\n').slice(0,-1).join('\n')||draft;h+=`<div class="post">${r.draft_image?`<figure style="margin:0"><img ${srcAttr(r.draft_srcs,r.draft_image)} data-credits="${esc(JSON.stringify(r.draft_credits||[]))}" alt="photo" onload="credit(this)" onerror="imgFail(this,'')"><figcaption class="pl cr" style="text-transform:none;letter-spacing:0"></figcaption></figure>`:''}<div class="pl">📍 Google post preview</div><div class="pt">${esc(txt)}</div></div>`+(rest?`<div class="t">${esc(rest)}</div>`:'')}
- h+=`<span class="tm">${now()}</span>`;if(first)h+=`<button class="why" onclick="drawer(true);return false">ⓘ How Vera wrote this</button>`;
+ h+=`<span class="tm">${now(ts)}</span>`;if(first)h+=`<button class="why" onclick="drawer(true);return false">ⓘ How Vera wrote this</button>`;
  if(r.buttons&&r.buttons.length)h+=`<div class="bt">${r.buttons.map(b=>`<button type="button">${esc(b)}</button>`).join('')}</div>`;
  const d=document.createElement('div');d.className='b v';d.innerHTML=h;$('#log').appendChild(d);
  d.querySelectorAll('.bt button').forEach(bt=>bt.onclick=()=>{d.querySelectorAll('.bt button').forEach(x=>x.disabled=true);send(bt.textContent)});scrollEnd();return d}
-function me(text,img){const d=document.createElement('div');d.className='b u';d.innerHTML=(img?`<img src="${img}" alt="photo">`:'')+(text?`<div class="t">${esc(text)}</div>`:'')+`<span class="tm">${now()} ✓✓</span>`;$('#log').appendChild(d);scrollEnd()}
+function me(text,img,ts){const d=document.createElement('div');d.className='b u';d.innerHTML=(img?`<img src="${img}" alt="photo">`:'')+(text?`<div class="t">${esc(text)}</div>`:'')+`<span class="tm">${now(ts)} ✓✓</span>`;$('#log').appendChild(d);scrollEnd()}
 function handle(r){if(r.error){chip(esc(r.error),'sys');return}
  if(r.action==='send')vera(r);else if(r.action==='wait')chip(`⏸ Vera pauses for ${Math.round(r.wait_seconds/60)} min — ${esc(r.rationale)}`,'sys');
  else{chip(`🔚 ${esc(r.rationale)}`,'sys');input(false,'Conversation closed — pick another merchant')}}
@@ -836,11 +939,32 @@ function side(){const el=$('#side'),pk=$('#pick');let h='',opts='<option value="
  else if(MODE==='tests'){h='<div class="gh">What the judge runs</div>'+TESTS.map(t=>`<div class="row" data-t="${t[0]}"><div class="ra" style="background:${color(t[1])}">🧪</div><div class="tx"><b>${t[1]}</b><span>${t[2]}</span></div><span class="pass" id="res_${t[0]}"></span></div>`).join('');
   el.innerHTML=h;document.querySelectorAll('.row').forEach(n=>n.onclick=()=>n.dataset.t==='inject'?runInject():runTest(n.dataset.t));TESTS.forEach(t=>opts+=`<option value="${t[0]}">${t[1]}</option>`)}
  else if(MODE==='custom'){customForm(el)}
+ else if(MODE==='history'){historyList(el)}
  else{const seen=new Set();const ms=SC.filter(x=>x.audience==='merchant'&&!seen.has(x.merchant_id)&&seen.add(x.merchant_id));
   el.innerHTML='<div class="gh">Pick a merchant</div>'+ms.map(x=>`<div class="row" data-m="${x.merchant_id}"><div class="ra" style="background:${color(x.merchant)}">${ini(x.merchant)}</div><div class="tx"><b>${esc(x.merchant)}</b><span>${esc(x.category)}</span></div></div>`).join('');
   document.querySelectorAll('.row').forEach(n=>n.onclick=()=>week(SC.find(x=>x.merchant_id===n.dataset.m)));ms.forEach(x=>opts+=`<option value="${x.merchant_id}">${esc(x.merchant)}</option>`)}
- pk.innerHTML=opts;pk.style.display=MODE==='custom'?'none':''}
+ pk.innerHTML=opts;pk.style.display=(MODE==='custom'||MODE==='history')?'none':''}
 $('#pick').onchange=e=>{const v=e.target.value;if(!v)return;if(MODE==='chat')start(SC.find(x=>x.id===v));else if(MODE==='tests')(v==='inject'?runInject():runTest(v));else week(SC.find(x=>x.merchant_id===v))};
+
+// ---------- chat history (saved on the server, listed per browser)
+const ago=t=>{const s=Math.max(0,Date.now()/1000-t);return s<60?'just now':s<3600?Math.floor(s/60)+' min ago':s<86400?Math.floor(s/3600)+' h ago':Math.floor(s/86400)+' d ago'};
+async function historyList(el){el.innerHTML='<div class="gh">Your previous chats</div><div id="hrows"><p class="hint" style="padding:10px 16px">Loading…</p></div>';
+ let rows=[];try{rows=await (await fetch('/demo/api/chats?owner='+encodeURIComponent(OWNER))).json()}catch(e){}
+ const box=$('#hrows');if(!box)return;
+ if(!rows.length){box.innerHTML='<p class="hint" style="padding:10px 16px;color:var(--muted)">No chats yet — start one in Live chat or Try your own. They are saved here automatically.</p>';return}
+ box.innerHTML=rows.map(x=>`<div class="row${sid===x.id?' on':''}" data-id="${esc(x.id)}"><div class="ra" style="background:${color(x.title)}">${ini(x.title)}</div><div class="tx"><b>${esc(x.title)}</b><span>${esc(x.subtitle)} · ${ago(x.updated)}${x.ended?' · closed':''}</span><span style="display:block">${esc(x.last)}</span></div><button class="del" title="Delete chat" data-del="${esc(x.id)}">×</button></div>`).join('');
+ box.querySelectorAll('.row').forEach(n=>n.onclick=e=>{if(e.target.dataset.del)return;openChat(n.dataset.id)});
+ box.querySelectorAll('[data-del]').forEach(b=>b.onclick=async e=>{e.stopPropagation();await fetch('/demo/api/chats/'+encodeURIComponent(b.dataset.del)+'?owner='+encodeURIComponent(OWNER),{method:'DELETE'});
+  if(store.get('vera_last_chat')===b.dataset.del)store.set('vera_last_chat',null);if(sid===b.dataset.del){sid=null;empty()}historyList(el)})}
+async function openChat(id,quiet){let c;try{const res=await fetch('/demo/api/chats/'+encodeURIComponent(id)+'?owner='+encodeURIComponent(OWNER));if(!res.ok)throw 0;c=await res.json()}
+ catch(e){if(!quiet)chip('That chat is no longer available','sys');store.set('vera_last_chat',null);return false}
+ const ui=c.ui||{};drawer(false);$('#log').innerHTML='';sid=c.id;store.set('vera_last_chat',c.id);cur={audience:ui.audience||'merchant',to:ui.to};
+ header(ui.header||c.title,true);$('#dealsBtn').textContent=cur.audience==='customer'?'🏷 Send deals':'🏷 Deals';chip('Saved chat · '+esc(c.subtitle||''),'sys');
+ let first=true,lastBubble=null;
+ c.log.forEach(e=>{if(e.role==='me')me(e.text,e.img,e.ts);else if(e.role==='vera'){const r=e.r||{};if(first){LAST=r;lastBubble=vera(r,{first:true,ts:e.ts});first=false}else if(r.action==='send')lastBubble=vera(r,{ts:e.ts});else handle(r)}});
+ document.querySelectorAll('#log .b.v').forEach(b=>{if(b!==lastBubble)b.querySelectorAll('.bt button').forEach(x=>x.disabled=true)});
+ const closed=c.ended;input(!closed,closed?'Conversation closed — start a new one':(cur.audience==='customer'?`Reply as ${cur.to}…`:`Reply as ${cur.to||'the owner'}…`));
+ if(LAST&&LAST.profile)insights();if(MODE==='history')historyList($('#side'));return true}
 
 // ---------- try your own scenario
 let CT=null;
@@ -874,7 +998,7 @@ async function runCustom(f){const t=CT.templates.find(x=>x.id===f.template.value
  const who=t.audience==='customer'?fields.customer_name:body.owner;
  cur={audience:t.audience,to:who};header(t.audience==='customer'?`to ${who} · on behalf of ${body.name}`:`to ${body.name} · ${body.category}`,true);
  chip('Your scenario');chip(esc(t.label)+' · '+esc(body.name),'sys');chip('Writing…');
- try{const r=await post('/demo/api/custom',body);$('#log').lastChild.remove();sid=r.session_id;LAST=r;
+ try{const r=await post('/demo/api/custom',body);$('#log').lastChild.remove();sid=r.session_id;store.set('vera_last_chat',sid);LAST=r;
   if(r.consent_blocked)chip('Vera did not message this customer — no consent to contact them','sys');
   vera(r,{first:true});input(true,`Reply as ${who||'the owner'}…`);insights();
   $('#drawer').insertAdjacentHTML('beforeend',`<div class="sec"><h4>What Vera received</h4><details class="ctx"><summary>Show the exact context built from your form</summary><pre>${esc(JSON.stringify(r.context_sent,null,1))}</pre></details></div>`)}
@@ -893,7 +1017,7 @@ async function start(x){if(!x)return;MODE='chat';cur=x;side();$('#log').innerHTM
  header(x.audience==='customer'?`to ${x.to} · on behalf of ${x.merchant}`:`to ${x.merchant} · ${x.category}`,true);$('#dealsBtn').textContent=x.audience==='customer'?'🏷 Send deals':'🏷 Deals';
  chip('Today');chip('Vera works for magicpin · every fact is verified against the merchant\'s data','sys');chip('Writing…');
  const r=await post('/demo/api/start',{trigger_id:x.trigger_id,customer_id:x.customer_id,language:LANG});$('#log').lastChild.remove();
- sid=r.session_id;LAST=r;vera(r,{first:true});input(true,x.audience==='customer'?`Reply as ${x.to}…`:`Reply as ${x.to||'the owner'}…`);insights()}
+ sid=r.session_id;store.set('vera_last_chat',sid);LAST=r;vera(r,{first:true});input(true,x.audience==='customer'?`Reply as ${x.to}…`:`Reply as ${x.to||'the owner'}…`);insights()}
 async function send(text,img){if(!sid||(!text.trim()&&!img))return;me(text,img);$('#in').value='';handle(await post('/demo/api/reply',{session_id:sid,message:text,image:img||null}))}
 async function deals(){if(!sid)return;handle(await post('/demo/api/deals',{session_id:sid}))}
 function insights(){const r=LAST;if(!r)return;const p=r.profile||{};const cu=p.customer;
@@ -922,8 +1046,10 @@ async function week(x){if(!x)return;MODE='week';side();sid=null;input(false,'Wee
  $('#drawer').innerHTML=`<div class="dh"><b>📅 Why a portfolio</b><button onclick="drawer(false)">×</button></div><div class="sec"><p>Reminders like renewals are rare. Engaging a merchant 3–5× a week needs knowledge- and curiosity-led conversations: research, trends, events, asks. Each one here is fact-checked.</p></div>`;drawer(true)}
 
 // ---------- wiring
-document.querySelectorAll('#nav button').forEach(b=>b.onclick=()=>{MODE=b.dataset.m;document.querySelectorAll('#nav button').forEach(x=>x.classList.toggle('on',x===b));$('#shell').classList.toggle('custom',MODE==='custom');side();
- if(MODE==='chat')empty();else if(MODE==='custom'){sid=null;cur=null;drawer(false);header('Your own scenario',false);input(false,'Fill in the form, then reply here');
+document.querySelectorAll('#nav button').forEach(b=>b.onclick=()=>{MODE=b.dataset.m;document.querySelectorAll('#nav button').forEach(x=>x.classList.toggle('on',x===b));$('#shell').classList.toggle('custom',MODE==='custom'||MODE==='history');side();
+ if(MODE==='chat')empty();else if(MODE==='history'){if(!sid){drawer(false);header('Your previous chats',false);input(false,'Pick a saved chat');
+  $('#log').innerHTML=`<div class="empty"><h2>History</h2><p>Every chat you start here is saved automatically. Pick one on the left to read it again or continue where you left off.</p></div>`}}
+ else if(MODE==='custom'){sid=null;cur=null;drawer(false);header('Your own scenario',false);input(false,'Fill in the form, then reply here');
   $('#log').innerHTML=`<div class="empty"><h2>Try your own scenario</h2><p>Pick a category, make up a business and choose what happened today — rain, a festival, a competitor, a drop in calls, a new review theme, a customer due for a visit. Vera writes the message live, and you can reply to it like the owner.</p><p style="font-size:13px">Nothing here is pre-written: the same agents that handle the official test cases run on your data.</p></div>`}
  else{sid=null;drawer(false);header(MODE==='tests'?'Pick a judge test on the left':'Pick a merchant on the left',false);input(false,'Read-only view');
   $('#log').innerHTML=`<div class="empty"><h2>${MODE==='tests'?'Judge tests':'Weekly plan'}</h2><p>${MODE==='tests'?'Run the exact scenarios magicpin\'s judge uses: auto-replies, intent switches, hostile replies, curveballs, and new context arriving mid-test.':'See five different conversations Vera would have with one merchant this week.'}</p></div>`}});
@@ -932,5 +1058,5 @@ $('#insBtn').onclick=()=>drawer(!$('#shell').classList.contains('drawer'));$('#d
 $('#f').onsubmit=e=>{e.preventDefault();send($('#in').value)};
 $('#att').onclick=()=>$('#file').click();
 $('#file').onchange=e=>{const f=e.target.files[0];if(!f)return;const img=new Image(),rd=new FileReader();rd.onload=()=>{img.onload=()=>{const k=Math.min(1,1024/Math.max(img.width,img.height));const c=document.createElement('canvas');c.width=img.width*k;c.height=img.height*k;c.getContext('2d').drawImage(img,0,0,c.width,c.height);send($('#in').value,c.toDataURL('image/jpeg',.82))};img.src=rd.result};rd.readAsDataURL(f);e.target.value=''};
-(async()=>{SC=await (await fetch('/demo/api/scenarios')).json();side();empty()})();
+(async()=>{SC=await (await fetch('/demo/api/scenarios')).json();side();empty();const last=store.get('vera_last_chat');if(last)await openChat(last,true)})();
 </script></body></html>"""

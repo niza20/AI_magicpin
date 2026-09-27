@@ -197,3 +197,33 @@ def test_try_your_own_scenario_every_template_and_category():
     # hostile input is bounded and never breaks composition
     r = c.post("/demo/api/custom", json={"category": "nope", "template": "nope", "name": "<script>x</script>" * 20, "views": "abc"}).json()
     assert r["body"] and len(r["context_sent"]["merchant"]["identity"]["name"]) <= 80
+
+
+def test_demo_chats_are_saved_listed_restored_and_private(tmp_path):
+    import os
+    import demo_store
+    import demo_ui
+    if not os.path.exists(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "dataset", "expanded")):
+        pytest.skip("official dataset not expanded")
+    demo_store.reset_for_tests(str(tmp_path / "chats.db"))
+    c = TestClient(bot.app)
+    me, other = "owner_aaaaaaaa1", "owner_bbbbbbbb2"
+    sc = next(x for x in c.get("/demo/api/scenarios").json() if x["merchant"].startswith("Mylari"))
+    s = c.post("/demo/api/start", json={"trigger_id": sc["trigger_id"], "owner": me}).json()
+    sid = s["session_id"]
+    c.post("/demo/api/reply", json={"session_id": sid, "message": "Yes, go ahead", "owner": me})
+    demo_ui._sessions.clear()                                   # server restart: in-memory state gone
+    r = c.post("/demo/api/reply", json={"session_id": sid, "message": "GO", "owner": me}).json()
+    assert r["body"].startswith(("Sent", "Bhej diya")), "rebuilt by replay and continued from the right state"
+    lst = c.get("/demo/api/chats", params={"owner": me}).json()
+    assert [x["id"] for x in lst] == [sid] and lst[0]["turns"] == 2
+    chat = c.get(f"/demo/api/chats/{sid}", params={"owner": me}).json()
+    assert [e["role"] for e in chat["log"]] == ["vera", "me", "vera", "me", "vera"] and all(e.get("ts") for e in chat["log"])
+    assert c.get(f"/demo/api/chats/{sid}", params={"owner": other}).status_code == 404, "other browsers can't read it"
+    assert c.get("/demo/api/chats", params={"owner": other}).json() == []
+    assert c.get("/demo/api/chats", params={"owner": "bad id!"}).json() == []
+    assert not c.delete(f"/demo/api/chats/{sid}", params={"owner": other}).json()["deleted"]
+    assert c.delete(f"/demo/api/chats/{sid}", params={"owner": me}).json()["deleted"]
+    assert c.get("/demo/api/chats", params={"owner": me}).json() == []
+    # the judge API never touches the demo database
+    assert c.post("/v1/teardown").json()["ok"]
