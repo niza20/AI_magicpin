@@ -61,6 +61,7 @@ class Store:
         self.ctx: dict[tuple[str, str], dict] = {}
         self.conversations: dict[str, ConversationState] = {}
         self.sent_keys: set[str] = set()
+        self.sent_bodies: set[tuple] = set()      # (merchant, customer, body) — never send the same text twice
         self.merchant_memory: dict[str, dict] = {}
 
     def get(self, scope: str, cid: Optional[str]) -> Optional[dict]:
@@ -134,8 +135,8 @@ def plan_tick(now: str, trigger_ids: list[str], deadline: float) -> list[dict]:
         out, ex = res.output, res.extras
         if ex.get("consent_blocked") or ex.get("fallback"):
             return None                                # don't spam low-value / non-consented sends
-        if out["suppression_key"] in STORE.sent_keys:
-            return None
+        if out["suppression_key"] in STORE.sent_keys or (mid, cid, out["body"]) in STORE.sent_bodies:
+            return None                                # anti-repetition: identical text already sent to this recipient
         return {"conversation_id": conv_id, "merchant_id": mid, "customer_id": cid, "send_as": out["send_as"],
                 "trigger_id": tid, "template_name": ex.get("template_name", "vera_generic_v1"),
                 "template_params": [str(p) for p in ex.get("template_params", [])], "body": out["body"],
@@ -152,9 +153,10 @@ def plan_tick(now: str, trigger_ids: list[str], deadline: float) -> list[dict]:
     with STORE.lock:
         final = []
         for a in actions:
-            if a["suppression_key"] in STORE.sent_keys:
+            if a["suppression_key"] in STORE.sent_keys or (a["merchant_id"], a["customer_id"], a["body"]) in STORE.sent_bodies:
                 continue
             STORE.sent_keys.add(a["suppression_key"])
+            STORE.sent_bodies.add((a["merchant_id"], a["customer_id"], a["body"]))
             category, merchant, trg, customer = a.pop("_ctx")
             st = ConversationState(conversation_id=a["conversation_id"], merchant_id=a["merchant_id"],
                                    customer_id=a["customer_id"], trigger_id=a["trigger_id"], category=category,

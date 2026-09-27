@@ -65,3 +65,5 @@ Real payloads for the placeholder triggers (half the test set), actual review te
 slots for customer bookings, and Vera's own plan pricing so "how much?" could be answered instead of deferred.
 A consistent "now" timestamp on triggers would also help: here it is inferred from `date − days_until` or the ISO week
 in the suppression key. `dev_fixtures/` holds extra synthetic edge cases used by the tests.
+
+**Verify against the brief:** `python scripts/verify_brief.py` runs 79 checks (HTTP contract, context injection, replay scenarios, anti-patterns, deliverables) on the official dataset.

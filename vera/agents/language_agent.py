@@ -35,7 +35,8 @@ class LanguageAgent(Agent):
         lang: Optional[str] = None
         if override in ("en", "hi-en", "hi"):
             lang, source = override, "explicit user choice"
-        if not lang and latest_reply:
+        if not lang and latest_reply and len(latest_reply.split()) >= 2:
+            # one-word replies ("ok", "hmm", "?") carry no language signal — keep the profile's language
             lang, source = detect_language(latest_reply), "latest reply"
         if not lang and customer_facing:
             lang, source = normalise_pref(tools.get_customer_fact("identity.language_pref")
