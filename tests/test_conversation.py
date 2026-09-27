@@ -346,3 +346,24 @@ def test_customer_yes_follows_what_the_opening_offered():
     assert respond(st, "yes")["body"].startswith("Booked ✅ Sat 3 May, 8am")
     from vera.conversation import cust_time
     assert cust_time("can't make it tomorrow, saturday 11am?") == "Saturday, 11am"
+
+
+def test_every_category_merchant_and_customer_scripts_never_stall():
+    """Review sweep: 2 merchant scripts × every merchant trigger, 4 customer scripts × every customer trigger."""
+    from vera.dataset import load_dataset
+    import os
+    ds = load_dataset(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "dataset", "expanded"))
+    mer = [["kya hai ye?", "kitna kharcha hoga?", "haan kar do", "draft kaha hai", "GO", "aur koi idea?", "1", "GO", "thanks"]]
+    cus = [["haan", "kal shaam 8 baje", "kitne ka hai?", "any offers?", "table for 4 people chahiye", "booked hai?", "thanks"],
+           ["yes", "saturday", "11am", "hair spa bhi karwana hai", "dard ho raha hai", "is it confirmed?"],
+           ["krdo", "what are the timings", "hello ?", "kyaa ?", "tomorrow morning 7", "Crocin bhi bhej do", "thanks"]]
+    for tid, t in ds.triggers.items():
+        m = ds.merchants[t["merchant_id"]]; cu = ds.customers.get(t.get("customer_id")) if t.get("customer_id") else None
+        cat = ds.category_for(m); op = compose(cat, m, t, cu)
+        on_behalf = cu is not None and op["send_as"] == "merchant_on_behalf"
+        for sc in (cus if on_behalf else mer):
+            st = new_state("sw", cat, m, t, cu if on_behalf else None, op["body"])
+            for msg in sc:
+                r = respond(st, msg)
+                b = r.get("body", "")
+                assert r["action"] == "send" and "get back to you" not in b and not b.startswith("Noted, "), (tid, msg, b or r.get("rationale"))

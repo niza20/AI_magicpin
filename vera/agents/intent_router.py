@@ -15,7 +15,10 @@ from .base import Agent
 _HINGLISH = {"hai", "hain", "nahi", "nahin", "kya", "karo", "kar", "mujhe", "aap", "aapka", "aapki", "haan", "han",
              "theek", "thik", "chahiye", "kitna", "kitne", "bhai", "ji", "mein", "ka", "ki", "ko", "kaise", "abhi",
              "baad", "kab", "batao", "bolo", "accha", "achha", "acha", "karna", "karni", "hoga", "wala", "wali",
-             "chalega", "sahi", "bhejo", "bhej", "mat", "band", "kyun", "kyu", "matlab", "samjha", "dijiye", "karein"}
+             "chalega", "sahi", "bhejo", "bhej", "mat", "band", "kyun", "kyu", "matlab", "samjha", "dijiye", "karein",
+             "kal", "aaj", "parso", "baje", "subah", "shaam", "sham", "raat", "dopahar", "bhi", "dedo", "chaiye",
+             "chaiyee", "krdo", "kardo", "skte", "sakte", "rhega", "rahega", "karwana", "karana", "wahan", "kahan", "kaha",
+             "kitni", "koi", "aur", "hua", "gaya", "dard", "daant", "dawai", "kripya", "jaldi", "zaroor", "pakka"}
 
 _STOP = re.compile(r"\b(stop|unsubscribe|opt[\s-]?out|spam|don'?t (message|msg|text|contact|call)|do not (message|msg|text|contact)|"
                    r"stop (messaging|texting|sending)|band karo|mat bhejo|message mat|remove me|block)\b")
