@@ -67,14 +67,18 @@ RULES = {  # category → ordered (keywords, photo key); first match on merchant
     "pharmacies": [((), "pharmacy")],
 }
 _NO_PHOTO_FAMILIES = {"account", "regulation", "supply"}
+_IMG_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".svg": "image/svg+xml"}
 
 
 def _photo_srcs(key: str, w: int) -> list[str]:
     label, tags = PHOTOS[key]
-    srcs = [f"/demo/assets/{f.name}" for f in sorted(_ASSETS.glob(f"{key}.*"))] if _ASSETS.exists() else []
+    files = sorted(_ASSETS.glob(f"{key}.*"), key=lambda f: (f.suffix.lower() == ".svg", f.name)) if _ASSETS.exists() else []
+    srcs = [f"/demo/assets/{f.name}" for f in files if f.suffix.lower() in _IMG_TYPES]   # real photos first, then our SVG art
+    if srcs:
+        return srcs
     h = w * 5 // 9 if w > 200 else w
     lock = sum(map(ord, key)) % 50 + 1        # stable photo per subject
-    return srcs + [f"https://loremflickr.com/{w}/{h}/{tags}?lock={lock}"]
+    return [f"https://loremflickr.com/{w}/{h}/{tags}?lock={lock}"]
 
 
 def _dish(m: dict, text: str = "") -> Optional[dict]:
@@ -88,16 +92,18 @@ def _dish(m: dict, text: str = "") -> Optional[dict]:
     srcs = _photo_srcs(key, 720)
     return {"url": srcs[0], "srcs": srcs, "thumb": _photo_srcs(key, 96)[0], "thumbs": _photo_srcs(key, 96),
             "label": PHOTOS[key][0], "key": key,
-            "caption": "Sample photo — Vera uses your own photos when you share them"}
+            "caption": "Illustration — Vera uses your own photos when you share them"}
 
 
 @router.get("/demo/assets/{name}")
 def asset(name: str):
     from fastapi.responses import FileResponse
     f = (_ASSETS / name).resolve()
-    if f.parent != _ASSETS.resolve() or not f.is_file() or f.suffix.lower() not in (".jpg", ".jpeg", ".png", ".webp"):
+    if f.parent != _ASSETS.resolve() or not f.is_file() or f.suffix.lower() not in _IMG_TYPES:
         return JSONResponse(status_code=404, content={"error": "not found"})
-    return FileResponse(f, headers={"Cache-Control": "public, max-age=86400"})
+    return FileResponse(f, media_type=_IMG_TYPES[f.suffix.lower()],
+                        headers={"Cache-Control": "public, max-age=86400", "X-Content-Type-Options": "nosniff",
+                                 "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'"})
 
 
 def _dataset():
