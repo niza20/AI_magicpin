@@ -7,6 +7,7 @@ Real LLM scoring (key stays in your shell, never in a file):
     python scripts/run_judge.py https://your-bot.onrender.com phase2_short
 
 Without JUDGE_API_KEY it uses a stub scorer (conversation tests still run; scores are placeholders).
+Optional: JUDGE_DELAY=3 (seconds between judge calls), JUDGE_MAX=15 (score only the first N messages).
 Scenarios: all | warmup | phase2_short | auto_reply_hell | intent_transition | hostile | full_evaluation
 """
 import os
@@ -83,9 +84,68 @@ if provider and (key or provider == "ollama"):
 else:
     llm = StubLLM()
 
+class Throttled(js.LLMProvider):
+    """Wraps the judge LLM: spaces calls out and retries on rate limits (HTTP 429 / 5xx) instead of
+    silently falling back to judge_simulator's placeholder scores (5/5/5/5 + digit-counting specificity)."""
+
+    def __init__(self, inner, delay: float, retries: int = 6):
+        self.inner, self.delay, self.retries = inner, delay, retries
+        self.ok = self.failed = 0
+
+    def name(self):
+        return self.inner.name() + f" · {self.delay:g}s between calls, retry on 429"
+
+    def complete(self, prompt, system=None):
+        import time
+        from urllib.error import HTTPError
+        wait = max(self.delay, 2.0)
+        for attempt in range(self.retries + 1):
+            time.sleep(self.delay)
+            try:
+                out = self.inner.complete(prompt, system)
+                self.ok += 1
+                return out
+            except HTTPError as e:
+                if e.code in (429, 500, 502, 503, 504) and attempt < self.retries:
+                    retry_after = e.headers.get("retry-after") if e.headers else None
+                    pause = float(retry_after) if retry_after and retry_after.replace(".", "").isdigit() else wait
+                    print(f"  … judge LLM {e.code}, waiting {pause:.0f}s (retry {attempt + 1}/{self.retries})")
+                    time.sleep(pause)
+                    wait = min(wait * 2, 60)
+                    continue
+                self.failed += 1
+                raise
+            except Exception:
+                self.failed += 1
+                raise
+        self.failed += 1
+        raise RuntimeError("judge LLM kept failing")
+
+
+limit = int(os.environ.get("JUDGE_MAX", "0") or 0)
+if limit:
+    _orig = js.LLMScorer.score
+    _count = {"n": 0}
+
+    def _limited(self, *a, **k):
+        _count["n"] += 1
+        if _count["n"] > limit:
+            return js.ScoreResult(hint="skipped (JUDGE_MAX reached)")
+        return _orig(self, *a, **k)
+    js.LLMScorer.score = _limited
+
+if not isinstance(llm, StubLLM):
+    llm = Throttled(llm, float(os.environ.get("JUDGE_DELAY", "3")))
 js.DatasetLoader = Loader
 js.BOT_URL = bot_url
 print(f"Judge LLM: {llm.name()} · bot: {bot_url} · scenario: {scenario} · data: {data_dir}")
 judge = js.JudgeSimulator(llm)
 judge.client = js.BotClient(bot_url)
-sys.exit(0 if judge.run(scenario) else 1)
+ok = judge.run(scenario)
+if isinstance(llm, Throttled):
+    real, fb = llm.ok, llm.failed
+    print(f"\nJudge calls: {real} real LLM judgements, {fb} failed → fallback placeholder scores.")
+    if fb:
+        print("⚠ Fallback scores are 5/5/5/5 + digit-count specificity — they are NOT the judge's opinion. "
+              "Increase JUDGE_DELAY (e.g. export JUDGE_DELAY=8) or lower JUDGE_MAX and re-run.")
+sys.exit(0 if ok else 1)
