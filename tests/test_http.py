@@ -283,3 +283,15 @@ def test_browser_get_on_post_endpoints_explains_usage(client):
         r = client.get(f"/v1/{name}")
         assert r.status_code == 200 and r.json()["method"] == "POST"
     assert client.get("/v1/nope").status_code == 404
+
+
+def test_browser_gets_console_page_but_judge_gets_json(client):
+    html = {"Accept": "text/html,application/xhtml+xml"}
+    for p in ("/v1/tick", "/demo/v1/tick", "/v1/healthz", "/demo/v1/reply", "/console"):
+        r = client.get(p, headers=html)
+        assert r.status_code == 200 and "API console" in r.text, p
+    assert client.get("/", headers=html, follow_redirects=False).headers["location"] == "/demo"
+    assert client.get("/v1/healthz", headers=html, params={"format": "json"}).json()["status"] == "ok"
+    assert client.get("/v1/healthz").json()["status"] == "ok"                  # judge: no text/html
+    assert client.get("/demo/v1/healthz", headers={"Accept": "*/*"}).json()["status"] == "ok"
+    assert "Vera" in client.get("/demo", headers=html).text

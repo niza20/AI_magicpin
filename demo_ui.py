@@ -875,7 +875,7 @@ button{font:inherit}
 .app{display:flex;align-items:center;gap:14px;padding:10px 18px;background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap}
 .logo{width:38px;height:38px;border-radius:50%;background:radial-gradient(circle at 30% 30%,#1a8f7a,#0b4f45);color:#fff;font-weight:800;font-size:10px;display:flex;align-items:center;justify-content:center;letter-spacing:.04em}
 .brand b{display:block;font-size:16px}.brand span{color:var(--muted);font-size:12px}.sp{flex:1}
-.nav{display:flex;background:var(--bg);border-radius:20px;padding:3px}.nav button{border:0;background:transparent;color:var(--muted);padding:6px 14px;border-radius:16px;cursor:pointer;font-weight:600;font-size:13px}.nav button.on{background:var(--panel);color:var(--accent);box-shadow:var(--shadow)}
+.nav{display:flex;background:var(--bg);border-radius:20px;padding:3px}.nav button{border:0;background:transparent;color:var(--muted);padding:6px 14px;border-radius:16px;cursor:pointer;font-weight:600;font-size:13px}.nav .navlink{color:var(--muted);padding:6px 14px;border-radius:16px;font-weight:600;font-size:13px;text-decoration:none}.nav .navlink:hover{color:var(--accent)}.nav button.on{background:var(--panel);color:var(--accent);box-shadow:var(--shadow)}
 select{background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:16px;padding:6px 10px;font-size:13px}
 .shell{display:grid;grid-template-columns:300px minmax(0,1fr);height:calc(100vh - 59px)}
 .shell.drawer{grid-template-columns:300px minmax(0,1fr) 340px}
@@ -946,7 +946,7 @@ mark{border-radius:3px;padding:0 1px;color:inherit}mark.merchant{background:rgba
 @media (max-width:900px){.nav{max-width:100%;overflow-x:auto;scrollbar-width:none}.nav::-webkit-scrollbar{display:none}.nav button{flex:none}.shell.featmode #side{display:none}.shell,.shell.drawer{grid-template-columns:1fr}#side{display:none}.shell.custom #side{display:block;max-height:48vh;border-right:0;border-bottom:1px solid var(--line)}#pick{display:block;max-width:60vw}#drawer{position:fixed;inset:59px 0 0 12%;z-index:5;box-shadow:-4px 0 18px rgba(0,0,0,.2)}.steps{grid-template-columns:1fr}#log{padding:12px 3%}.b{max-width:90%}}
 </style></head><body>
 <header class="app"><div class="logo">VERA</div><div class="brand"><b>Vera by magicpin</b><span>AI assistant for local merchants on WhatsApp — live demo</span></div>
-<div class="nav" id="nav"><button data-m="chat">Live chat</button><button data-m="features" class="on">Features</button><button data-m="tests">Judge tests</button><button data-m="week">Weekly plan</button><button data-m="custom">Try your own</button><button data-m="history">History</button></div>
+<div class="nav" id="nav"><button data-m="chat">Live chat</button><button data-m="features" class="on">Features</button><button data-m="tests">Judge tests</button><button data-m="week">Weekly plan</button><button data-m="custom">Try your own</button><button data-m="history">History</button><a class="navlink" href="/console" title="The judge endpoints, with a live Send button">API</a></div>
 <div class="sp"></div><select id="pick"></select>
 <select id="lang" title="Message language"><option value="auto">🌐 Auto (from profile)</option><option value="en">English</option><option value="hi-en">Hinglish</option><option value="hi">हिन्दी</option></select></header>
 <div class="shell" id="shell">
@@ -1248,5 +1248,5 @@ $('#insBtn').onclick=()=>drawer(!$('#shell').classList.contains('drawer'));$('#d
 $('#f').onsubmit=e=>{e.preventDefault();send($('#in').value)};
 $('#att').onclick=()=>$('#file').click();
 $('#file').onchange=e=>{const f=e.target.files[0];if(!f)return;const img=new Image(),rd=new FileReader();rd.onload=()=>{img.onload=()=>{const k=Math.min(1,1024/Math.max(img.width,img.height));const c=document.createElement('canvas');c.width=img.width*k;c.height=img.height*k;c.getContext('2d').drawImage(img,0,0,c.width,c.height);send($('#in').value,c.toDataURL('image/jpeg',.82))};img.src=rd.result};rd.readAsDataURL(f);e.target.value=''};
-(async()=>{SC=await (await fetch('/demo/api/scenarios')).json();go('features')})();
+(async()=>{SC=await (await fetch('/demo/api/scenarios')).json();const h=location.hash.slice(1);go(['chat','features','tests','week','custom','history'].includes(h)?h:'features')})();
 </script></body></html>"""

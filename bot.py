@@ -241,6 +241,27 @@ if FastAPI is not None:
     except Exception:  # demo is optional; the judge contract never depends on it
         pass
 
+    import api_console as _console
+    from fastapi.responses import HTMLResponse, RedirectResponse
+
+    @app.middleware("http")
+    async def _browser_view(request, call_next):
+        """A browser opening / or a /v1 endpoint gets a page (demo / API console); the judge always gets JSON."""
+        path = request.scope["path"]
+        if request.method == "GET" and _console.wants_html(request):
+            if path == "/":
+                return RedirectResponse("/demo")
+            m = None if path.startswith("/demo/api/") else _ALIAS.match(path)
+            if m:
+                return HTMLResponse(_console.page(_NAMES.get(m.group(1), m.group(1))))
+            if path.rstrip("/") in ("/v1", "/demo/v1"):
+                return HTMLResponse(_console.page())
+        return await call_next(request)
+
+    @app.get("/console")
+    def console():
+        return HTMLResponse(_console.page())
+
     @app.get("/")
     def root():
         return {"service": "Vera agentic bot", "status": "ok", "chat_demo": "/demo",
