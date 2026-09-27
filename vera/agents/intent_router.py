@@ -216,3 +216,47 @@ def language_signal(message: str) -> Optional[str]:
     if lang == "en":
         return "en" if words >= 3 else None
     return lang if words >= 2 else None
+
+
+# ---------------------------------------------------------------- confidentiality
+# Checked BEFORE every other intent: "Send me Priya's phone number" must never read as a go-ahead ("send").
+_PEOPLE = r"(customers?|patients?|clients?|members?|diners?|reviewers?|people|log|grahak|mareez|users?|them|unka|unke|inka|inke)"
+_PII = r"(phone|mobile|contact|cell|whatsapp)\s*(no\.?|nos?|numbers?|details?)?|address(es)?|e-?mail|pata|personal details?|ghar ka|number"
+_CONF_PII = re.compile(
+    rf"\b({_PII})\b[^.?!]{{0,40}}\b{_PEOPLE}\b|\b{_PEOPLE}\b[^.?!]{{0,40}}\b({_PII})\b"
+    r"|\b[a-z]+'s\s+(personal\s+|private\s+|own\s+)?(phone|mobile|number|contact|address|email)\b"
+    r"|(?<!my )(?<!mera )(?<!our )\b(personal|private)\s+(mobile|phone|cell|whatsapp|number|contact|address|e-?mail)\b|\b(ka|ki|ke)\s+(phone\s*)?(number|nambar|contact|address|pata)\b"
+    r"|\bnames?\s+(of|and)\s+(the\s+|my\s+|all\s+)?(customers|patients|clients|members|people|reviewers)\b"
+    r"|\bwho\s+(left|wrote|gave|posted)\b[^.?!]{0,30}\breview|\bkis(ne)?\b[^.?!]{0,20}\breview\b|\blist of (my )?(customers|patients|clients|members)\b", re.I)
+_BIZ = (r"(competitor|competition|rival|smile studio|dusr[ae]|doosr[ae]|other\s+(merchants?|clinics?|salons?|gyms?|restaurants?|"
+        r"pharmac\w*|dentists?|doctors?|businesses|shops?|stores?|stud\w+|outlets?|partners?)|nearby\s+\w+|next door|padosi)")
+_BIZ_DATA = (r"(calls|views|revenue|sales|income|earning\w*|turnover|profit|data|numbers|stats|customers|patients|clients|ctr|leads|"
+             r"footfall|orders|pay\w*|commission|fees?|charges?|contract|plan|subscription|bookings|kamai|kitna kama)")
+_CONF_BIZ = re.compile(rf"\b{_BIZ}\b[^.?!]{{0,50}}\b{_BIZ_DATA}\b|\b{_BIZ_DATA}\b[^.?!]{{0,40}}\b(of|for|do|does|did|ka|ke|ki|charge\w*|pay\w*)\b[^.?!]{{0,25}}\b{_BIZ}\b"
+                       r"|\bwho\s+else\b[^.?!]{0,30}\bmagicpin\b|\bwhich\s+other\b[^.?!]{0,40}\b(on|use|using|with)\s+magicpin\b", re.I)
+_CONF_INTERNAL = re.compile(r"\b(system\s+prompt|your\s+(prompt|instructions|rules|algorithm|source\s*code|code|training|backend|internal\s+\w+)|"
+                            r"prompt\s+(dikhao|batao|show)|how\s+(are|were)\s+you\s+(built|trained|programmed|coded)|ignore\s+(all\s+|your\s+|previous\s+)*instructions|"
+                            r"magicpin'?s?\s+(internal|confidential|secret)|internal\s+(data|docs?|policy|policies|metrics))\b", re.I)
+_CONF_OWN = re.compile(r"\b((what|which|kya|kaunsa)\s+(all\s+)?(data|information|info|details)\s+(do\s+you|you|aapke\s+paas|tumhare\s+paas)?\s*(have|hold|store|keep|know|hai)?"
+                       r"|my\s+(own\s+)?(data|numbers|stats|statistics|performance|calls|views|ctr|dashboard|insights)|mera\s+data|mere\s+(numbers|calls|views)"
+                       r"|how\s+(am\s+i|is\s+my\s+(listing|profile|business|clinic|salon|gym|restaurant|shop|store))\s+doing)\b", re.I)
+_CONF_SHARE = re.compile(r"\b((share|sell|give|show|leak|pass)\w*\s+(my|our|mera|hamara)\s+(data|numbers|details|info\w*|stats|customers?)"
+                         r"|(will|do|can)\s+(you|other\w*|competitors?)[^.?!]{0,30}\b(see|know|access|get)\b[^.?!]{0,20}\b(my|our)\b"
+                         r"|(is|are)\s+(my|our)\s+(data|details|numbers|info\w*)\s+(safe|private|secure|confidential)|data\s+(safe|private|secure)\s+hai"
+                         r"|privacy|confidential)\b", re.I)
+
+
+def confidential_kind(message: str) -> Optional[str]:
+    """customer_pii | other_business | internal | share_concern | own_data | None."""
+    m = message or ""
+    if _CONF_PII.search(m):
+        return "customer_pii"
+    if _CONF_INTERNAL.search(m):
+        return "internal"
+    if _CONF_SHARE.search(m):
+        return "share_concern"
+    if _CONF_BIZ.search(m) and not re.search(r"\b(offer|launch offer|kaunsa|which competitor|who is it|kaun hai|where)\b", m, re.I):
+        return "other_business"
+    if _CONF_OWN.search(m):
+        return "own_data"
+    return None

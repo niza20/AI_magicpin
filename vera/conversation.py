@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from .agents.composer import Brief
-from .agents.intent_router import AutoReplyDetector, IntentRouter, detect_language, language_signal
+from .agents.intent_router import AutoReplyDetector, IntentRouter, confidential_kind, detect_language, language_signal
 from .agents.validators import FactChecker, PolicyChecker
 from .orchestrator import Orchestrator
 from .types import Draft, LanguagePlan, StrategyPlan, TraceStep
@@ -112,6 +112,10 @@ _ACK = re.compile(r"^\s*(thanks?|thank you|thx|ty|shukriya|dhanyavaad|dhanyawad|
                   r"got it|noted|okay noted|ok noted|theek hai|thik hai|accha|achha)\b[\w\s!.🙏👍]*$", re.I)
 
 
+_OTHER_PEOPLE = re.compile(r"\b(which|who|kaun|kis|how many)\b[^.?!]{0,25}\b(other|else|aur|baaki|dusre|doosre)\b[^.?!]{0,20}\b(customers?|patients?|clients?|members?|people|log)\b"
+                           r"|\b(other|baaki|dusre|doosre)\s+(customers?|patients?|clients?|members?|people|log)\b[^.?!]{0,30}\b(name|number|coming|visit|book|appointment|details?|kaun)", re.I)
+
+
 def promised(state) -> tuple[str, Optional[str]]:
     """What Vera last offered to do, read from its own words (so a YES delivers exactly that)."""
     for body in reversed(state.bot_bodies()):
@@ -176,8 +180,19 @@ class ReplyEngine:
         w = self._working(state, message)
         mi = intent.merchant_intent
 
+        conf = confidential_kind(message)
+        if not conf and (from_role == "customer" or state.customer) and _OTHER_PEOPLE.search(message):
+            conf = "customer_pii"          # a customer asking about other customers' visits/bookings
+        if conf and (from_role == "customer" or state.customer):
+            return self._send(state, w, self._confidential_customer(w, conf), "open_ended",
+                              f"Confidentiality ({conf}): customer asked for data that isn't theirs to see — declined, offered help.")
         if from_role == "customer" or state.customer:
             return self._customer_reply(state, w, message, mi)
+        if conf:
+            state.intents[-1] = f"confidential:{conf}"
+            return self._send(state, w, self._confidential(state, w, conf), "binary_yes_stop" if conf != "own_data" else "open_ended",
+                              f"Confidentiality ({conf}): shared only what this merchant is entitled to see, then back to the one useful step.",
+                              allow=("self_intro",) if conf == "internal" else ())
 
         if mi == "not_interested":
             state.exit_state = "ended"
@@ -505,6 +520,72 @@ class ReplyEngine:
             return [b.t("Saved ✅ I'll send you the details and a reminder the day before. Anything else for this week?",
                         "Save kar liya ✅ Details aur ek din pehle reminder bhej dungi. Is hafte aur kuch?")]
         return None
+
+    # ------------------------------------------------------- confidentiality
+    def _own_numbers(self, w: dict) -> tuple[str, str]:
+        b = w["brief"]
+        parts_en, parts_hi = [], []
+        if b.P("views") and b.P("window"):
+            parts_en.append(f"{b.P('views')} views" + (f" and {b.P('calls')} calls" if b.P("calls") else "") + f" in the last {b.P('window')}")
+            parts_hi.append(f"pichhle {b.P('window').replace('days', 'din')} mein {b.P('views')} views" + (f" aur {b.P('calls')} calls" if b.P("calls") else ""))
+        if b.P("ctr"):
+            parts_en.append(f"CTR {b.P('ctr')}" + (f" (anonymised {b.prof.peer_label} average: {b.P('peer_ctr')})" if b.P("peer_ctr") else ""))
+            parts_hi.append(f"CTR {b.P('ctr')}" + (f" (anonymised {b.prof.peer_label} average: {b.P('peer_ctr')})" if b.P("peer_ctr") else ""))
+        o, kind = b.offer()
+        if o and kind == "active":
+            parts_en.append(f"active offer: {o}")
+            parts_hi.append(f"active offer: {o}")
+        return "; ".join(parts_en), "; ".join(parts_hi)
+
+    def _confidential(self, state: ConversationState, w: dict, kind: str) -> list[str]:
+        """Merchant asked for something confidential — share only what's theirs, never other people's data."""
+        b = w["brief"]
+        name = b.P("name") or "your business"
+        cn = b.cust_noun()
+        a_en, a_hi = self._action_phrase(w)
+        own_en, own_hi = self._own_numbers(w)
+        if kind == "customer_pii":
+            return [b.t(f"I can't share {cn}' phone numbers, addresses or names, {b.sal()} — that stays private, even from me in chat. "
+                        f"What I can do: send your message to them through magicpin (only to those who opted in), so you reach them without seeing their details. "
+                        f"Want me to draft that WhatsApp? Reply YES.",
+                        f"{b.sal()}, {cn} ke phone number, address ya naam main share nahi kar sakti — woh private rehte hain. "
+                        f"Main kya kar sakti hoon: aapka message magicpin ke through unhe bhej sakti hoon (sirf opted-in {cn} ko), bina unki details dikhaye. "
+                        f"WhatsApp draft kar doon? Reply YES.")]
+        if kind == "other_business":
+            comp = ""
+            if w["ta"].family == "competitor" and b.A("name"):
+                bits = [x for x in (b.A("distance") and f"{b.A('distance')} away", b.A("offer") and f"launch offer {b.A('offer')}") if x]
+                comp = f"{b.A('name')}" + (f" ({', '.join(bits)})" if bits else "")
+            pub_en = f" What's public: {comp}." if comp else ""
+            pub_hi = f" Jo public hai: {comp}." if comp else ""
+            peer_en = f" For comparison I only use anonymised averages — your CTR is {b.P('ctr')} vs {b.P('peer_ctr')} for {b.prof.peer_label}." if b.P("ctr") and b.P("peer_ctr") else ""
+            peer_hi = f" Comparison ke liye main sirf anonymised average use karti hoon — aapka CTR {b.P('ctr')} hai vs {b.prof.peer_label} ka {b.P('peer_ctr')}." if b.P("ctr") and b.P("peer_ctr") else ""
+            return [b.t(f"That's another business's private data, {b.sal()}, so I can't share it — just as I'd never share {name}'s numbers with anyone.{pub_en}{peer_en} "
+                        f"Want me to {a_en}? Reply YES.",
+                        f"{b.sal()}, yeh doosre business ka private data hai, isliye share nahi kar sakti — jaise {name} ke numbers bhi kisi ko nahi deti.{pub_hi}{peer_hi} "
+                        f"Main {a_hi.rstrip('?')}? Reply YES.")]
+        if kind == "internal":
+            return [b.t(f"That's internal to magicpin, so I can't share it, {b.sal()}. In short: I'm Vera — I look at {name}'s listing data and suggest one useful step at a time, and nothing goes live without your OK. "
+                        f"Want me to {a_en}? Reply YES.",
+                        f"{b.sal()}, yeh magicpin ka internal hai, isliye share nahi kar sakti. Short mein: main Vera hoon — {name} ke listing data se ek-ek useful step suggest karti hoon, aur aapke OK ke bina kuch live nahi hota. "
+                        f"Main {a_hi.rstrip('?')}? Reply YES.")]
+        if kind == "share_concern":
+            return [b.t(f"No — {name}'s numbers stay private to you and the magicpin team, {b.sal()}. Other merchants never see them; comparisons only use anonymised averages across many businesses. "
+                        f"Want me to {a_en}? Reply YES.",
+                        f"Nahi — {name} ke numbers sirf aapke aur magicpin team ke paas rehte hain, {b.sal()}. Doosre merchants unhe kabhi nahi dekhte; comparison sirf kai businesses ke anonymised average se hota hai. "
+                        f"Main {a_hi.rstrip('?')}? Reply YES.")]
+        # own_data — the merchant is entitled to their own numbers
+        body_en = f"Here's what I have for {name}: {own_en}." if own_en else f"I only use {name}'s own listing data (views, calls, offers, reviews)."
+        body_hi = f"{name} ke liye mere paas yeh hai: {own_hi}." if own_hi else f"Main sirf {name} ka apna listing data use karti hoon (views, calls, offers, reviews)."
+        return [b.t(f"{body_en} Only you and the magicpin team see this — never other merchants. Want me to {a_en}?",
+                    f"{body_hi} Yeh sirf aap aur magicpin team dekhte hain — doosre merchants nahi. Main {a_hi.rstrip('?')}?")]
+
+    def _confidential_customer(self, w: dict, kind: str) -> list[str]:
+        b = w["brief"]
+        name = b.P("name") or "the team"
+        first = (w["cust"].first_name if w.get("cust") else "") or ""
+        return [b.t(f"Sorry {first}, we can't share other customers' or staff members' personal details. For anything about your own visit, just reply here and {name} will help.".replace("Sorry , ", "Sorry, "),
+                    f"Sorry {first}, doosre customers ya staff ki personal details hum share nahi kar sakte. Apni visit ke baare mein kuch bhi ho toh yahin reply kijiye, {name} madad karega.".replace("Sorry , ", "Sorry, "))]
 
     # ------------------------------------------------------- photos & deals
     def respond_photo(self, state: ConversationState, image_ref: str, caption: str = "") -> dict:
