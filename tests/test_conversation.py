@@ -282,3 +282,33 @@ def test_merchant_writing_devanagari_is_understood_and_answered_in_devanagari():
     assert r["action"] == "send" and "↓" in r["body"] and re.search(r"[ऀ-ॿ]{3,}", r["body"])
     r = respond(st, "कोई और आइडिया?")
     assert "1." in r["body"] and "2." in r["body"]
+
+
+# ---- customer booking flow (review screenshot: "krdo", "ok", "what are the timings", "hello ?", "kyaa ?") -------
+def _vivaan():
+    from vera.dataset import load_dataset
+    import os
+    ds = load_dataset(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "dataset", "expanded"))
+    t = ds.triggers["trg_081_chronic_refill_due_m_011_dr_sameer_dent"]; m = ds.merchants[t["merchant_id"]]
+    c = ds.customers[t["customer_id"]]; cat = ds.category_for(m)
+    return new_state("vv", cat, m, t, c, compose(cat, m, t, c)["body"])
+
+
+def test_customer_flow_moves_to_a_booking_and_never_stalls():
+    st = _vivaan()
+    seen = set()
+    for msg in ["krdo", "ok", "what are the timings", "hello ?", "kyaa ?"]:
+        r = respond(st, msg)
+        assert r["action"] == "send" and "get back to you" not in r["body"] and r["body"] not in seen, (msg, r["body"])
+        seen.add(r["body"])
+    assert "follow-up" in r["body"].lower(), "'kyaa ?' restates why we messaged"
+    r = respond(st, "tomorrow 5pm")
+    assert r["body"].startswith("Booked ✅ Tomorrow, 5pm") and "Bright Smile Dental" in r["body"]
+    assert "tomorrow, 5pm" in respond(st, "ok")["body"]
+
+
+def test_customer_time_parser():
+    from vera.conversation import cust_time
+    assert cust_time("kal shaam 6 baje") == "Tomorrow evening, 6pm"
+    assert cust_time("saturday evening") == "Saturday evening"
+    assert cust_time("what are the timings") is None and cust_time("hello ?") is None

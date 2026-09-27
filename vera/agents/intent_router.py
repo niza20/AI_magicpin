@@ -26,7 +26,7 @@ _NOT_INTERESTED = re.compile(r"\b(not interested|no interest|interest nahi|nahi 
                              r"not for me|we'?re good|i'?m good)\b|^\s*(no|nope|nahi|nahin|na)\s*[.!]*\s*$")
 _ACTION = re.compile(r"\b(yes|yess+|yeah|yep|yup|haan|han ji|haan ji|ha ji|ok+|okay|okk|sure|go ahead|go for it|do it|let'?s do( it)?|"
                      r"lets do( it)?|let'?s go|start( it)?|join|proceed|send( it| me| please)?|confirm|confirmed|please do|"
-                     r"kar ?do|karo|kardo|kar dijiye|chalega|chalo|theek hai|thik hai|done|book( it)?|activate|"
+                     r"kar ?do|karo|kardo|kar dijiye|kr ?do|krdo|kr ?dijiye|krdijiye|kar dena|kr dena|book kar ?do|book kr ?do|chalega|chalo|theek hai|thik hai|done|book( it)?|activate|"
                      r"update (my|the)|sounds good|go live|publish|post it|i want to join|judna hai|judrna hai|"
                      r"i'?m in|count me in|bhej do|bhejo|haan karo|agreed|approve|approved)\b|^\s*go\s*[.!]*\s*$|👍|✅")
 _LATER = re.compile(r"\b(later|busy|baad me(in)?|kal|tomorrow|call me later|not now|abhi nahi|abhi nahin|next week|"
