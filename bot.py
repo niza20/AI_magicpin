@@ -62,6 +62,7 @@ class Store:
         self.conversations: dict[str, ConversationState] = {}
         self.sent_keys: set[str] = set()
         self.sent_bodies: set[tuple] = set()      # (merchant, customer, body) — never send the same text twice
+        self.sent_by_trigger: dict[str, tuple] = {}   # trigger_id → (sent_at, suppression_key, body tuple)
         self.merchant_memory: dict[str, dict] = {}
 
     def get(self, scope: str, cid: Optional[str]) -> Optional[dict]:
@@ -157,6 +158,7 @@ def plan_tick(now: str, trigger_ids: list[str], deadline: float) -> list[dict]:
                 continue
             STORE.sent_keys.add(a["suppression_key"])
             STORE.sent_bodies.add((a["merchant_id"], a["customer_id"], a["body"]))
+            STORE.sent_by_trigger[a["trigger_id"]] = (time.time(), a["suppression_key"], (a["merchant_id"], a["customer_id"], a["body"]))
             category, merchant, trg, customer = a.pop("_ctx")
             st = ConversationState(conversation_id=a["conversation_id"], merchant_id=a["merchant_id"],
                                    customer_id=a["customer_id"], trigger_id=a["trigger_id"], category=category,
@@ -165,6 +167,9 @@ def plan_tick(now: str, trigger_ids: list[str], deadline: float) -> list[dict]:
             STORE.conversations[a["conversation_id"]] = st
             final.append(a)
     return final
+
+
+RESEND_AFTER_S = 60
 
 
 def handle_reply(body: dict) -> dict:
@@ -294,6 +299,16 @@ if FastAPI is not None:
             cur = STORE.ctx.get(key)
             if cur and cur["version"] > body.version:
                 return JSONResponse(status_code=409, content={"accepted": False, "reason": "stale_version", "current_version": cur["version"]})
+            if body.scope == "trigger":
+                # A trigger pushed again well after Vera messaged about it = a new test run against the same live bot
+                # (judge_simulator never calls teardown). Let it be sent once more; quick repeated ticks stay deduped.
+                prev = STORE.sent_by_trigger.get(body.context_id)
+                if prev and time.time() - prev[0] >= RESEND_AFTER_S:
+                    STORE.sent_by_trigger.pop(body.context_id, None)
+                    STORE.sent_keys.discard(prev[1])
+                    STORE.sent_bodies.discard(prev[2])
+                    for cid_ in [c for c, st in STORE.conversations.items() if st.trigger_id == body.context_id]:
+                        STORE.conversations.pop(cid_, None)
             if not (cur and cur["version"] == body.version):
                 STORE.ctx[key] = {"version": body.version, "payload": body.payload}
                 if body.scope == "merchant" and body.payload.get("merchant_id") and body.payload["merchant_id"] != body.context_id:

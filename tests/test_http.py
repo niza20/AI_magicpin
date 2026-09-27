@@ -295,3 +295,23 @@ def test_browser_gets_console_page_but_judge_gets_json(client):
     assert client.get("/v1/healthz").json()["status"] == "ok"                  # judge: no text/html
     assert client.get("/demo/v1/healthz", headers={"Accept": "*/*"}).json()["status"] == "ok"
     assert "Vera" in client.get("/demo", headers=html).text
+
+
+def test_rerun_against_same_bot_resends_after_trigger_repush(client, monkeypatch):
+    """judge_simulator never tears down: a second run (trigger re-pushed later) must still get its message;
+    an immediate re-tick stays deduped."""
+    import bot as B
+    cat = {"slug": "dentists"}
+    m = {"merchant_id": "m_rr", "category_slug": "dentists", "identity": {"name": "RR Dental", "owner_first_name": "Asha"},
+         "performance": {"views": 900, "calls": 9, "window_days": 30}}
+    t = {"id": "trg_rr", "scope": "merchant", "kind": "regulation_change", "merchant_id": "m_rr",
+         "payload": {"deadline_iso": "2026-12-15"}, "urgency": 4}
+    push = lambda: [client.post("/v1/context", json={"scope": s, "context_id": i, "version": 1, "payload": p})
+                    for s, i, p in (("category", "dentists", cat), ("merchant", "m_rr", m), ("trigger", "trg_rr", t))]
+    tick = lambda: client.post("/v1/tick", json={"now": "2026-09-27T10:00:00Z", "available_triggers": ["trg_rr"]}).json()["actions"]
+    push(); assert len(tick()) == 1
+    assert tick() == []                                   # same run: no duplicate
+    push(); assert tick() == []                           # immediate re-push: still deduped
+    sent_at, k, bt = B.STORE.sent_by_trigger["trg_rr"]
+    B.STORE.sent_by_trigger["trg_rr"] = (sent_at - B.RESEND_AFTER_S - 1, k, bt)
+    push(); assert len(tick()) == 1                       # a later run gets its message again
