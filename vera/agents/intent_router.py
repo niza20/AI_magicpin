@@ -93,6 +93,10 @@ class AutoReplyDetector(Agent):
         n = _norm(message)
         repeats = sum(1 for m in prior_merchant_msgs if _norm(m) == n and n)
         pattern = bool(_AUTO_PATTERNS.search(message or ""))
+        if not pattern and _CONFIRM_ONLY.match(message or ""):
+            repeats = 0          # tapping "Yes, go ahead" / "ok" / "GO" twice is a person, not an auto-reply
+        elif not pattern and len((message or "").split()) <= 4 and repeats < 2:
+            repeats = 0          # short replies need the brief's 3+ verbatim repeats before they count
         if pattern and repeats:
             v = AutoReplyVerdict(True, 0.99, f"canned phrasing + repeated verbatim {repeats + 1}x", "exit")
         elif repeats >= 1:
@@ -204,7 +208,7 @@ class IntentRouter(Agent):
         return bool(_PRICE.search((message or "").lower()))
 
 
-_CONFIRM_ONLY = re.compile(r"^\s*(yes|yeah|yep|ok|okay|sure|go|go ahead|yes,? go ahead|not now|no|no thanks|thanks|thank you|done|fine)[\s!.,]*$", re.I)
+_CONFIRM_ONLY = re.compile(r"^\s*(yes|yeah|yep|ya|haan|ha|ji|ok|okay|sure|go|go ahead|yes,? go ahead|not now|no|nope|nahi|no thanks|thanks|thank you|done|fine)[\s!.,]*$", re.I)
 
 
 def language_signal(message: str) -> Optional[str]:

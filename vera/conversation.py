@@ -82,6 +82,11 @@ class ConversationState:
     merchant_memory: dict = field(default_factory=dict)          # shared per-merchant memory (e.g. auto-reply texts)
     attachments: list = field(default_factory=list)              # photos the merchant shared in this chat
     pending_deal: Optional[str] = None                           # catalog deal Vera proposed to put live
+    last_draft: Optional[str] = None                             # the artifact Vera last delivered (post text, WhatsApp, ...)
+    draft_live: bool = False                                     # merchant confirmed it with GO
+    ideas: list = field(default_factory=list)                    # numbered next-step ideas Vera offered
+    promise_override: Optional[tuple] = None                     # (kind, offer) chosen from the ideas menu
+    delivered: list = field(default_factory=list)                # (kind, offer) of every artifact already delivered
 
     def bot_bodies(self) -> list[str]:
         return [m["body"] for m in self.messages if m["from"] == "vera"]
@@ -116,8 +121,33 @@ _OTHER_PEOPLE = re.compile(r"\b(which|who|kaun|kis|how many)\b[^.?!]{0,25}\b(oth
                            r"|\b(other|baaki|dusre|doosre)\s+(customers?|patients?|clients?|members?|people|log)\b[^.?!]{0,30}\b(name|number|coming|visit|book|appointment|details?|kaun)", re.I)
 
 
+_IDEAS_Q = re.compile(r"\b((other|more|aur|next|new|koi aur|dusr\w*|doosr\w*)\s+(marketing\s+)?(strateg\w*|ideas?|suggestions?|options?|tips?|ways?|tareeke|tarike)"
+                      r"|marketing\s+(strateg\w*|ideas?|tips?|plan)|what\s+else\b|aur\s+kya\b|kya\s+aur\b|how\s+(can|do)\s+i\s+(grow|get\s+more|increase|improve)"
+                      r"|suggest\s+(something|more|me)|any\s+(other\s+)?(ideas?|suggestions?)|next\s+step|^\s*ideas?\s*[!.?]*\s*$)", re.I)
+_DRAFT_Q = re.compile(r"\b(where|show|send|see|share|resend|kahan|kaha|dikhao|dikha\s*do|bhejo|bhej\s*do)\b[^.?!]{0,25}\b(draft|preview|post|message|msg)\b"
+                      r"|\b(draft|preview)\b[^.?!]{0,15}\b(where|kahan|kaha|nahi\s+(aaya|mila|dikha)|not\s+(here|shown|visible|received)|missing)\b"
+                      r"|\b(i\s+)?(can'?t|cannot|don'?t)\s+see\s+(the\s+|any\s+)?(draft|preview|post)", re.I)
+_NO_ONLY = re.compile(r"^\s*(no|nope|nah|nahi|nahin|na|no thanks|no changes?|nothing|kuch nahi|all good|sab theek|theek hai)[\s!.,🙂👍]*$", re.I)
+_PICK = re.compile(r"^\s*(?:option\s*|idea\s*|no\.?\s*)?([1-3])\b|^\s*(first|second|third|pehla|pehli|doosra|doosri|dusra|teesra|teesri)\b", re.I)
+_ORD = {"first": 1, "pehla": 1, "pehli": 1, "second": 2, "doosra": 2, "doosri": 2, "dusra": 2, "third": 3, "teesra": 3, "teesri": 3}
+
+
+def draft_core(body: str) -> str:
+    """The artifact inside a delivery message: lines after '↓', minus the trailing GO/edits instruction."""
+    lines = (body or "").split("\n")
+    idx = [i for i, ln in enumerate(lines) if "↓" in ln]
+    if not idx:
+        return body.strip()
+    core = lines[idx[0] + 1:]
+    while core and re.search(r"\bGO\b|edits|bhej dijiye|reply", core[-1], re.I):
+        core = core[:-1]
+    return "\n".join(core).strip() or body.strip()
+
+
 def promised(state) -> tuple[str, Optional[str]]:
     """What Vera last offered to do, read from its own words (so a YES delivers exactly that)."""
+    if state.promise_override:
+        return state.promise_override
     for body in reversed(state.bot_bodies()):
         asks = [x for x in re.split(r"(?<=[.!?])\s+", body) if "?" in x or re.search(r"\bYES\b", x)]
         text = " ".join(asks[-2:]) if asks else ""
@@ -194,6 +224,54 @@ class ReplyEngine:
                               f"Confidentiality ({conf}): shared only what this merchant is entitled to see, then back to the one useful step.",
                               allow=("self_intro",) if conf == "internal" else ())
 
+        b = w["brief"]
+        last_vera = (state.bot_bodies() or [""])[-1] if len(state.bot_bodies()) else ""
+        # a number / "first" right after the ideas menu → deliver that idea as a ready draft
+        pick = _PICK.match(message) if state.ideas else None
+        if pick:
+            k = int(pick.group(1)) if pick.group(1) else _ORD.get(pick.group(2).lower(), 1)
+            if not 1 <= k <= len(state.ideas):
+                return self._send(state, w, self._ideas_menu(state, w), "open_ended", "Picked a number that isn't on the list → show the options again.")
+            if 1 <= k <= len(state.ideas):
+                idea = state.ideas[k - 1]
+                state.ideas, state.promise_override = [], (idea["kind"], idea.get("offer"))
+                w["promise"] = state.promise_override
+                state.actions_requested.append(idea["kind"])
+                body = self._act(w, False)
+                state.delivered.append((idea["kind"], idea.get("offer")))
+                if idea["kind"] != "photos":                   # photos: nothing to publish until they arrive
+                    state.last_draft, state.draft_live = body[0], False
+                return self._send(state, w, body, "open_ended", f"Merchant picked idea {k} ({idea['kind']}) → delivered it as a ready draft.")
+        # "other strategies / what else / aur kya" → 3 concrete ideas from this merchant's data
+        if _IDEAS_Q.search(message):
+            return self._send(state, w, self._ideas_menu(state, w), "open_ended",
+                              "Merchant asked for more ideas → 3 numbered, data-backed next steps; a number delivers the draft.")
+        # "where's the draft / show me" → show the actual draft (or make it now)
+        if _DRAFT_Q.search(message):
+            if state.last_draft:
+                core = draft_core(state.last_draft)
+                tail = b.t("Reply GO and it goes live, or send any edits.", "GO reply karein toh live kar doon, ya edits bhej dijiye.") if not state.draft_live \
+                    else b.t("This one is already live ✅ Want 3 more ideas? Reply YES.", "Yeh already live hai ✅ 3 aur ideas chahiye? YES reply karein.")
+                return self._send(state, w, [b.t(f"Here it is ↓\n{core}\n{tail}", f"Yeh raha ↓\n{core}\n{tail}"),
+                                             b.t(f"Sure — here's the draft ↓\n{core}\n{tail}", f"Zaroor — draft yeh raha ↓\n{core}\n{tail}")], "binary_yes_stop",
+                                  "Merchant asked for the draft → re-showed the exact artifact.")
+            mi = "explicit_action"                     # no draft yet → make it now
+        # "No" after "anything to change / anything else?" means no changes — not an opt-out
+        if _NO_ONLY.match(message) and state.actions_requested and (state.last_draft or re.search(
+                r"changed|change\b|edits?|anything else|aur kuch|badlaav|kuch aur", last_vera, re.I)):
+            if state.last_draft and not state.draft_live:
+                if re.search(r"changed|change\b|edits?|badlaav", last_vera, re.I):
+                    return self._send(state, w, [b.t("Great — no changes then. Reply GO and it goes live today.",
+                                                     "Badhiya — koi badlaav nahi. GO reply karein toh aaj hi live kar doon.")],
+                                      "binary_yes_stop", "'No' = no changes to the draft → one step from live.")
+                return self._send(state, w, [b.t("No problem — I'll hold it, nothing goes live without your OK. Want 3 other ideas instead? Reply YES.",
+                                                 "Koi baat nahi — main ise rok ke rakhti hoon, aapke OK ke bina kuch live nahi hoga. Iske bajaye 3 aur ideas chahiye? YES reply karein.")],
+                                  "open_ended", "'No' to a pending draft = hold it (not an opt-out) → offer alternatives.")
+            name = b.P("name") or "your business"
+            state.exit_state = "waiting"
+            return self._send(state, w, [b.t(f"All set 🙂 I'll message you when there's something useful for {name}. Ask me for ideas anytime.",
+                                             f"Sab set hai 🙂 {name} ke liye kuch useful hoga toh message karungi. Aur ideas chahiye toh kabhi bhi poochiye.")],
+                              "none", "'No' = nothing else needed → friendly close, conversation stays open.")
         if mi == "not_interested":
             state.exit_state = "ended"
             state.merchant_sentiment = "negative"
@@ -244,6 +322,12 @@ class ReplyEngine:
             b = w["brief"]
             kind = (w.get("promise") or ("post", None))[0]
             cn = b.cust_noun()
+            if kind == "photos" and not state.attachments:
+                return self._send(state, w, [b.t("Ready when you are 📸 Attach the photos with the 📎 button and I'll draft the post with them.",
+                                                 "Main ready hoon 📸 📎 button se photos bhejiye, main unke saath post draft kar dungi."),
+                                             b.t("Still waiting for the photos 📸 — the 📎 button is next to the message box.",
+                                                 "Photos ka intezaar hai 📸 — 📎 button message box ke paas hai.")],
+                                  "open_ended", "GO before any photo arrived → ask for the photos, don't claim anything is scheduled.")
             done = {
                 "review_request": (f"Sent ✅ The review request is going out to your recent happy {cn} today. I'll let you know as new reviews come in.",
                                    f"Bhej diya ✅ Review request aaj aapke recent happy {cn} ko ja rahi hai. Naye reviews aate hi bataungi."),
@@ -258,18 +342,37 @@ class ReplyEngine:
             }.get(kind, ("Scheduled ✅ Your post is queued and goes live on your listing today.",
                          "Schedule ho gaya ✅ Aapka post queue mein hai aur aaj listing pe live ho jaayega."))
             state.actions_requested.append("go")
-            return self._send(state, w, [b.t(done[0] + " Anything else for this week?", done[1] + " Is hafte aur kuch?")],
+            state.draft_live = True
+            return self._send(state, w, [b.t(done[0] + " Want 3 more ideas for this week? Reply YES.", done[1] + " Is hafte ke liye 3 aur ideas chahiye? YES reply karein."),
+                                         b.t("That's already live ✅ Want 3 more ideas for this week? Reply YES.", "Yeh already live hai ✅ Is hafte ke liye 3 aur ideas chahiye? YES reply karein.")],
                               "open_ended", f"Merchant confirmed with GO → '{kind}' executed; offer the next step.")
+        if mi == "explicit_action" and re.search(r"3 (more|other|aur) ideas", last_vera):
+            return self._send(state, w, self._ideas_menu(state, w), "open_ended", "Merchant said yes to more ideas → 3 numbered next steps.")
         if mi == "explicit_action":
             state.exit_state = None
             state.merchant_sentiment = "positive"
-            already = bool(state.actions_requested)
+            if state.last_draft and not state.draft_live:
+                core = draft_core(state.last_draft)
+                return self._send(state, w, [b.t(f"Your draft is ready ↓\n{core}\nReply GO and it goes live today, or send any edits.",
+                                                 f"Aapka draft ready hai ↓\n{core}\nGO reply karein toh aaj hi live kar doon, ya edits bhej dijiye."),
+                                             b.t(f"Here's the draft once more ↓\n{core}\nJust reply GO to publish it — or tell me one thing to change (the offer, timings or wording).",
+                                                 f"Draft ek baar phir ↓\n{core}\nPublish karne ke liye bas GO reply karein — ya ek cheez bataiye jo badalni hai (offer, timings ya wording).")],
+                                  "binary_yes_stop", "Go-ahead while a draft is pending → re-show the exact draft, one step from live.")
+            if state.draft_live:
+                return self._send(state, w, self._ideas_menu(state, w), "open_ended",
+                                  "Go-ahead after the last draft went live → offer the next 3 concrete ideas.")
             state.actions_requested.append(w["ta"].family)
-            body = self._act(w, already, price=router.is_price_question(message), when=_when(message))
+            body = self._act(w, False, price=router.is_price_question(message), when=_when(message))
+            state.last_draft, state.draft_live = body[0], False
+            state.delivered.append(tuple(w.get("promise") or ("post", None)))
             return self._send(state, w, body, "open_ended",
                               "Explicit go-ahead → ACT immediately (no re-qualification): delivered the artifact + next step.")
         if _ACK.match(message) and mi not in ("explicit_action",):
             b = w["brief"]
+            if state.draft_live:
+                return self._send(state, w, [b.t("Glad it helps 🙂 Want 3 more ideas for this week? Reply YES.",
+                                                 "Khushi hui 🙂 Is hafte ke liye 3 aur ideas chahiye? YES reply karein.")],
+                                  "open_ended", "Acknowledgement after going live → offer next ideas.")
             if state.actions_requested:
                 return self._send(state, w, [b.t("Glad it helps 🙂 Reply GO whenever you want it live — or send any edits.",
                                                  "Khushi hui 🙂 Jab chahein GO reply kar dijiye — ya edits bhej dijiye.")],
@@ -430,6 +533,22 @@ class ReplyEngine:
         lead = ""
         if fam == "festival" and b.A("name"):
             lead = f"This {b.A('name')}, "
+        elif fam == "seasonal":
+            items = [re.sub(r"\s*[+−-]?\d+%.*$", "", b.A(k) or "").strip() for k in ("up1", "up2", "up3")]
+            items = [x for x in items if x]
+            if items:
+                season = (b.Araw("season") or "")
+                label = "Summer essentials" if "summer" in str(season).lower() else "Seasonal essentials"
+                lead = f"{label} in stock: {', '.join(items[:-1]) + ' & ' + items[-1] if len(items) > 1 else items[0]}. "
+        elif fam == "local_event" and b.A("headline") and "vs" in (b.A("headline") or ""):
+            lead = f"{b.A('headline')} tonight? "
+        elif fam == "weather" and b.A("condition"):
+            lead = f"{str(b.A('condition')).capitalize()} today? "
+        elif fam == "milestone":
+            lead = "Thank you to every customer who made this possible! "
+        praise = b.P("praise")
+        if praise and fam not in ("reputation",):
+            lead += f"Loved for {praise}. "
         rating = f" Rated {b.P('rating')} by {b.P('reviews')} customers." if b.P("rating") and b.P("reviews") else ""
         if offer and kind in ("active", "inactive"):
             post = f"{lead}{offer} at {where}.{rating} Message us on WhatsApp to book."
@@ -490,6 +609,50 @@ class ReplyEngine:
         return [b.t(f"Done ✅ Here's the draft post for {name} ↓\n{post_en}\n{live_en}{extra_en}",
                     f"Ho gaya ✅ {name} ke liye draft post ↓\n{post_hi}\n{live_hi}{extra_hi}")]
 
+    def _ideas_menu(self, state: ConversationState, w: dict) -> list[str]:
+        """3 concrete next steps, each backed by this merchant's own data; replying 1/2/3 delivers the draft."""
+        b = w["brief"]
+        cn = b.cust_noun()
+        name = b.P("name") or "your business"
+        done_kinds = set(state.actions_requested)
+        o, okind = b.offer()
+        cands = []
+        if o:
+            what = "your" if okind == "active" else "a"
+            q = o if okind == "active" else f"'{o}'"
+            views = f" — your listing got {b.P('views')} views in {b.P('window')}" if b.P("views") and b.P("window") else ""
+            views_hi = f" — pichhle {b.P('window').replace('days', 'din')} mein {b.P('views')} views" if b.P("views") and b.P("window") else ""
+            cands.append({"kind": "post", "offer": o, "en": f"A fresh Google post featuring {what} {q} offer{views}",
+                          "hi": f"{q} offer ke saath ek fresh Google post{views_hi}"})
+            cands.append({"kind": "pin", "offer": o, "en": f"Pin {q} to the top of your Google profile so every visitor sees it first",
+                          "hi": f"{q} ko Google profile ke top pe pin karna, taaki har visitor pehle wahi dekhe"})
+        if b.P("complaint"):
+            cands.append({"kind": "review_replies", "en": f"Polite owner replies to the reviews mentioning {b.P('complaint')}",
+                          "hi": f"{b.P('complaint')} wale reviews pe polite owner replies"})
+        rv = f" — you're at {b.P('reviews')} reviews" if b.P("reviews") else ""
+        cands.append({"kind": "review_request", "en": f"A review-request WhatsApp to your recent happy {cn}{rv}",
+                      "hi": f"Recent happy {cn} ko review-request WhatsApp" + (f" — abhi {b.P('reviews')} reviews hain" if b.P("reviews") else "")})
+        lp = b.P("lapsed")
+        cands.append({"kind": "customer_msg", "offer": o,
+                      "en": f"A comeback WhatsApp to your {lp + ' ' if lp else ''}lapsed {cn}" + (f" with {o}" if o else ""),
+                      "hi": f"Aapke {lp + ' ' if lp else ''}lapsed {cn} ko comeback WhatsApp" + (f" {o} ke saath" if o else "")})
+        thing = {"restaurants": "dishes", "salons": "work (before/after)", "gyms": "sessions", "dentists": "clinic", "pharmacies": "store"}.get(b.prof.slug, "business")
+        thing_hi = {"restaurants": "dishes", "salons": "kaam (before/after)", "gyms": "sessions", "dentists": "clinic", "pharmacies": "store"}.get(b.prof.slug, "business")
+        cands.append({"kind": "photos", "en": f"Fresh photos of your {thing} — send 3-5 here and I'll turn them into listing photos + a post",
+                      "hi": f"Aapke {thing_hi} ki fresh photos — 3-5 yahan bhejiye, main listing photos + post bana dungi"})
+        done = {(k, o) for k, o in state.delivered} | {(k, None) for k, _ in state.delivered}
+        fresh = [c for c in cands if (c["kind"], c.get("offer")) not in done and (c["kind"], None) not in done and c["kind"] not in done_kinds]
+        ideas = (fresh or [c for c in cands if (c["kind"], c.get("offer")) not in done] or cands)[:3]
+        state.ideas = ideas
+        lines_en = "\n".join(f"{i + 1}. {c['en']}" for i, c in enumerate(ideas))
+        lines_hi = "\n".join(f"{i + 1}. {c['hi']}" for i, c in enumerate(ideas))
+        n = len(ideas)
+        nums_en = " or ".join(str(i + 1) for i in range(n)) if n <= 2 else "1, 2 or 3"
+        nums_hi = " ya ".join(str(i + 1) for i in range(n)) if n <= 2 else "1, 2 ya 3"
+        return [b.t(f"Here are {n} ideas for {name} this week:\n{lines_en}\nReply {nums_en} and I'll have it ready in a minute.",
+                    f"{name} ke liye is hafte {n} ideas:\n{lines_hi}\n{nums_hi} reply karein — ek minute mein ready."),
+                b.t(f"A few more things I can do for {name}:\n{lines_en}\nReply {nums_en}.", f"{name} ke liye aur kya kar sakti hoon:\n{lines_hi}\n{nums_hi} reply karein.")]
+
     def _deliver_promise(self, w: dict, kind: str, offer: Optional[str], when: Optional[str]) -> Optional[list[str]]:
         """Deliver exactly what the opening message offered (review request, customer WhatsApp, pin, ...)."""
         b = w["brief"]
@@ -513,6 +676,13 @@ class ReplyEngine:
             off = offer or b.offer()[0] or "your top offer"
             return [b.t(f"Done ✅ “{off}” is set to be pinned at the top of your Google profile while traffic is high. Reply GO to confirm, or tell me a different offer.",
                         f"Ho gaya ✅ “{off}” ko Google profile ke top pe pin karne ke liye set kar diya hai. Confirm karne ke liye GO reply karein, ya koi aur offer bataiye.")]
+        if kind == "photos":
+            return [b.t(f"Great 📸 Attach 3-5 photos here with the 📎 button (one at a time is fine). I'll crop them for your Google listing and draft a post with the best one — nothing goes live without your OK.",
+                        f"Badhiya 📸 📎 button se 3-5 photos yahan bhejiye (ek-ek karke bhi chalega). Main unhe Google listing ke liye crop karke best photo ke saath post draft kar dungi — aapke OK ke bina kuch live nahi hoga.")]
+        if kind == "review_replies" and w["ta"].family != "reputation":
+            theme = b.P("complaint") or "your recent feedback"
+            reply = f"Thank you for the feedback about {theme}. We've shared it with the team and are working on it — hope to see you again soon. — {name}"
+            return [b.t(f"Drafted ✅ Owner reply for the {theme} reviews ↓\n{reply}\n{go_en}", f"Draft ready ✅ {theme} wale reviews ke liye owner reply ↓\n{reply}\n{go_hi}")]
         if kind == "verification":
             return [b.t(f"Started ✅ I've raised the Google verification request for {name}. Google usually confirms by postcard or a phone call — reply here when you get the code and I'll finish it.",
                         f"Shuru kar diya ✅ {name} ke liye Google verification request raise kar di hai. Google postcard ya phone call se confirm karta hai — code aate hi yahan reply kijiye, baaki main kar dungi.")]

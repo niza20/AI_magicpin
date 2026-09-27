@@ -220,3 +220,44 @@ def test_customer_cannot_get_other_peoples_details():
     for q in ("Can you give me Dr. Meera's personal mobile number?", "Which other patients are coming on Wednesday?"):
         st = new_state("cp", cat, m, t, c, compose(cat, m, t, c)["body"])
         assert "can't share" in respond(st, q)["body"]
+
+
+# ---- follow-through after the first draft (screenshots from review) -------------------------------------------
+def _apollo():
+    from vera.dataset import load_dataset
+    import os
+    ds = load_dataset(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "dataset", "expanded"))
+    t = next(v for v in ds.triggers.values() if v["kind"] == "category_seasonal" and "apollo" in v["merchant_id"])
+    m = ds.merchants[t["merchant_id"]]; cat = ds.category_for(m)
+    return new_state("ap", cat, m, t, None, compose(cat, m, t, None)["body"])
+
+
+def test_draft_is_always_shown_never_just_queued():
+    st = _apollo()
+    r = respond(st, "Yes, go ahead")
+    assert "↓" in r["body"] and "ORS" in r["body"], "the draft carries the trigger's context (summer demand items)"
+    for msg in ("Yes, go ahead", "Where's the draft", "Yes"):
+        r = respond(st, msg)
+        assert r["action"] == "send" and "Free Home Delivery" in r["body"] and "queued" not in r["body"] and "Noted," not in r["body"], (msg, r["body"])
+    assert "auto-reply" not in r["body"].lower(), "tapping yes twice is not an auto-reply"
+    r = respond(st, "No")
+    assert r["action"] == "send" and "GO" in r["body"], "'No' to 'anything to change?' = no changes, not an opt-out"
+
+
+def test_other_strategies_gives_numbered_ideas_and_a_pick_delivers_a_draft():
+    st = _apollo()
+    respond(st, "Yes, go ahead")
+    assert respond(st, "GO")["body"].startswith(("Schedule", "Scheduled"))
+    r = respond(st, "yes some other marketing strategies")
+    assert "1." in r["body"] and "2." in r["body"] and "Reply" in r["body"]
+    r = respond(st, "2")
+    assert "↓" in r["body"] and "Noted," not in r["body"]
+    assert respond(st, "GO")["body"].startswith(("Sent", "Bhej", "Pinned", "Pin", "Scheduled", "Schedule"))
+
+
+def test_no_to_a_pending_draft_holds_it():
+    st = _apollo()
+    respond(st, "Yes, go ahead")
+    st.messages.append({"from": "vera", "body": "Here it is ↓ ... Reply GO.", "ts": 0})
+    r = respond(st, "no")
+    assert r["action"] == "send" and ("hold" in r["body"].lower() or "rok" in r["body"].lower() or "GO" in r["body"])
