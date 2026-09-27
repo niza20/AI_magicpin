@@ -242,7 +242,7 @@ if FastAPI is not None:
                 "approach": "15-agent orchestrated pipeline: fact-ledger context analyst, trigger analyst, intent router, "
                             "strategy planner, category expert, personalization, customer, language, composer (multi-candidate), "
                             "deterministic fact + policy checkers, engagement critic, rewriter, finalizer; stateful multi-turn with auto-reply detection",
-                "contact_email": "nishantaws01@gmail.com", "version": "1.0.0", "submitted_at": "2026-09-26T00:00:00Z"}
+                "contact_email": "nizagarg_23ec143@dtu.ac.in", "version": "1.0.0", "submitted_at": "2026-09-26T00:00:00Z"}
 
     @app.post("/v1/context")
     def push_context(body: CtxBody):
