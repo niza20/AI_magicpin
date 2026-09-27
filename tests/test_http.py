@@ -108,3 +108,24 @@ def test_post_submission_context_injection_is_used_without_leaks(client):
     assert "61%" in acts["trg_inj_2"]["body"] and "41%" not in acts["trg_inj_2"]["body"]
     cust = acts["trg_inj_3"]
     assert cust["send_as"] == "merchant_on_behalf" and "Glow Rivals" not in cust["body"], "merchant intel must not reach customers"
+
+
+def test_demo_photo_and_deals_flow():
+    import base64
+    import os
+    if not os.path.exists(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "dataset", "expanded")):
+        pytest.skip("official dataset not expanded")
+    c = TestClient(bot.app)
+    s = c.post("/demo/api/start", json={"trigger_id": "trg_013_corporate_thali_planning", "language": "en"}).json()
+    img = "data:image/png;base64," + base64.b64encode(b"\x89PNG....").decode()
+    r = c.post("/demo/api/reply", json={"session_id": s["session_id"], "image": img, "message": "Our new masala dosa"}).json()
+    assert r["action"] == "send" and r["draft_image"] == img and "Our new masala dosa" in r["body"] and "22 photos" in r["body"]
+    assert c.post("/demo/api/reply", json={"session_id": s["session_id"], "message": "GO"}).json()["body"].startswith("Scheduled")
+    d = c.post("/demo/api/deals", json={"session_id": s["session_id"]}).json()
+    assert "Weekday Lunch Thali @ ₹149" in d["body"] and "Flat 30%" not in d["body"], "service+price deals first, no % discounts"
+    assert "Done" in c.post("/demo/api/reply", json={"session_id": s["session_id"], "message": "Yes, go ahead"}).json()["body"]
+    bad = c.post("/demo/api/reply", json={"session_id": s["session_id"], "image": "javascript:alert(1)"})
+    assert bad.status_code == 400
+    # customers only get deal alerts with promotional consent
+    s2 = c.post("/demo/api/start", json={"trigger_id": "trg_019_chronic_refill_grandfather"}).json()
+    assert c.post("/demo/api/deals", json={"session_id": s2["session_id"]}).json()["action"] == "end"

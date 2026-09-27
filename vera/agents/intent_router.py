@@ -28,7 +28,7 @@ _ACTION = re.compile(r"\b(yes|yess+|yeah|yep|yup|haan|han ji|haan ji|ha ji|ok+|o
                      r"lets do( it)?|let'?s go|start( it)?|join|proceed|send( it| me| please)?|confirm|confirmed|please do|"
                      r"kar ?do|karo|kardo|kar dijiye|chalega|chalo|theek hai|thik hai|done|book( it)?|activate|"
                      r"update (my|the)|sounds good|go live|publish|post it|i want to join|judna hai|judrna hai|"
-                     r"i'?m in|count me in|bhej do|bhejo|haan karo|agreed|approve|approved)\b|👍|✅")
+                     r"i'?m in|count me in|bhej do|bhejo|haan karo|agreed|approve|approved)\b|^\s*go\s*[.!]*\s*$|👍|✅")
 _LATER = re.compile(r"\b(later|busy|baad me(in)?|kal|tomorrow|call me later|not now|abhi nahi|abhi nahin|next week|"
                     r"in a meeting|thodi der|some other time|remind me)\b")
 _OFF_TOPIC = re.compile(r"\b(gst|income tax|itr|tax filing|file (my )?tax|loan|visa|passport|insurance claim|"

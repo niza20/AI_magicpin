@@ -175,7 +175,29 @@ def start(body: dict):
     st.record_bot(res.output["body"], res.output["cta"])
     with _lock:
         _sessions[sid] = st
-    return {"session_id": sid, **_compose_payload(res, cat, m, t, c)}
+    out = {"session_id": sid, **_compose_payload(res, cat, m, t, c)}
+    low = out["body"].lower()
+    out["buttons"] = ["1", "2"] if re.search(r"reply 1 or 2|1 ya 2", low) else \
+        (["Yes, go ahead", "Not now"] if out["cta"] == "binary_yes_stop" else [])
+    return out
+
+
+def _with_ui(st: ConversationState, r: dict) -> dict:
+    """Decorate a reply for the chat UI: WhatsApp-style quick-reply buttons + draft-post preview image."""
+    body = r.get("body") or ""
+    low = body.lower()
+    buttons = []
+    if r.get("action") == "send":
+        if "reply go" in low or "go reply" in low:
+            buttons = ["GO"]
+        elif re.search(r"reply 1 or 2|1 ya 2", low):
+            buttons = ["1", "2"]
+        elif "reply yes" in low or "yes reply" in low or "yes भेजें" in low:
+            buttons = ["Yes, go ahead", "Not now"]
+    r["buttons"] = buttons
+    if "↓" in body and st.attachments:
+        r["draft_image"] = st.attachments[-1]
+    return r
 
 
 @router.post("/demo/api/reply")
@@ -183,7 +205,20 @@ def reply(body: dict):
     st = _sessions.get(body.get("session_id", ""))
     if not st:
         return JSONResponse(status_code=404, content={"error": "session expired — pick a scenario again"})
-    return _engine.respond(st, body.get("message", ""), "customer" if st.customer else "merchant")
+    if body.get("image"):
+        img = str(body["image"])
+        if not img.startswith("data:image/") or len(img) > 4_000_000:
+            return JSONResponse(status_code=400, content={"error": "please attach a JPG/PNG under ~3 MB"})
+        return _with_ui(st, _engine.respond_photo(st, img, body.get("message", "")))
+    return _with_ui(st, _engine.respond(st, body.get("message", ""), "customer" if st.customer else "merchant"))
+
+
+@router.post("/demo/api/deals")
+def deals(body: dict):
+    st = _sessions.get(body.get("session_id", ""))
+    if not st:
+        return JSONResponse(status_code=404, content={"error": "session expired — pick a scenario again"})
+    return _with_ui(st, _engine.deals(st))
 
 
 REPLAYS = {
@@ -346,128 +381,175 @@ def page():
 
 _PAGE = r"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Vera Agent Demo</title>
+<title>Vera by magicpin — demo</title>
 <style>
-:root{--bg:#f0f2f5;--panel:#fff;--ink:#111b21;--muted:#667781;--line:#e4e6eb;--me:#d9fdd3;--them:#fff;--chat:#efeae2;--accent:#008069;--chip:#e7f5f1;--good:#e6f4ea;--goodink:#1e6b3a;--bad:#fde8ec;--badink:#b3163c;--head:#f7f8fa}
-@media (prefers-color-scheme:dark){:root{--bg:#0b141a;--panel:#111b21;--ink:#e9edef;--muted:#8696a0;--line:#222d34;--me:#005c4b;--them:#202c33;--chat:#0b141a;--accent:#00a884;--chip:#1f2c33;--good:#12301f;--goodink:#7fd49b;--bad:#3a1520;--badink:#ff8fa6;--head:#17222a}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
-.top{display:flex;align-items:center;gap:14px;padding:10px 18px;background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap}
-.top b{font-size:17px}.top .sub{color:var(--muted);font-size:12px}.sp{flex:1}
-.seg{display:flex;border:1px solid var(--line);border-radius:18px;overflow:hidden}.seg button{border:0;background:transparent;color:var(--ink);padding:6px 12px;cursor:pointer;font-size:13px}.seg button.on{background:var(--accent);color:#fff}
-.wrap{display:grid;grid-template-columns:330px 1fr 330px;height:calc(100vh - 56px)}
-aside,.info{background:var(--panel);overflow:auto}aside{border-right:1px solid var(--line)}.info{border-left:1px solid var(--line);padding:14px 16px}
-.tabs{display:flex;position:sticky;top:0;background:var(--panel);border-bottom:1px solid var(--line);z-index:1}.tabs button{flex:1;border:0;background:none;color:var(--muted);padding:11px 4px;cursor:pointer;font-weight:600;font-size:13px;border-bottom:2px solid transparent}.tabs button.on{color:var(--accent);border-color:var(--accent)}
-.gh{padding:8px 16px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);background:var(--head);border-bottom:1px solid var(--line)}
-.sc{padding:9px 16px;border-bottom:1px solid var(--line);cursor:pointer}.sc:hover,.sc.on{background:var(--chip)}
-.sc b{font-size:14px}.sc span{display:block;color:var(--muted);font-size:12px}
-.pill{display:inline-block;font-size:10.5px;padding:1px 7px;border-radius:9px;margin-left:4px;background:var(--chip);color:var(--accent);font-weight:600;vertical-align:1px}
-.pill.cust{background:#fff3d6;color:#8a5a00}@media (prefers-color-scheme:dark){.pill.cust{background:#3b2f10;color:#f5c661}}
-.rp{padding:12px 16px;border-bottom:1px solid var(--line)}.rp b{display:block}.rp span{display:block;color:var(--muted);font-size:12px;margin:2px 0 8px}
-.btn{border:1px solid var(--accent);color:var(--accent);background:transparent;border-radius:16px;padding:5px 12px;cursor:pointer;font-size:13px;font-weight:600}.btn:hover{background:var(--chip)}
-main{display:flex;flex-direction:column;background:var(--chat);min-width:0}
-.head{background:var(--panel);padding:11px 16px;border-bottom:1px solid var(--line)}.head b{display:block}.head span{color:var(--muted);font-size:12px}
-#log{flex:1;overflow:auto;padding:16px 6%}
-.m{max-width:80%;padding:8px 11px;border-radius:9px;margin:6px 0;white-space:pre-wrap;box-shadow:0 1px .5px rgba(0,0,0,.13)}
-.v{background:var(--them)}.u{background:var(--me);margin-left:auto}.sys{margin:10px auto;text-align:center;color:var(--muted);font-size:12px;max-width:92%}
-.meta{display:block;color:var(--muted);font-size:11px;margin-top:4px}
-.badges{display:flex;flex-wrap:wrap;gap:5px;margin:4px 0 8px}.bd{font-size:11.5px;padding:3px 8px;border-radius:6px;background:var(--good);color:var(--goodink);font-weight:600}.bd.no{background:var(--bad);color:var(--badink)}
-.verdict{margin:12px auto;max-width:92%;padding:10px 14px;border-radius:10px;font-weight:600;text-align:center}.verdict.pass{background:var(--good);color:var(--goodink)}.verdict.fail{background:var(--bad);color:var(--badink)}
-.day{background:var(--them);border-radius:10px;padding:10px 12px;margin:10px 0;box-shadow:0 1px .5px rgba(0,0,0,.13)}.day h4{margin:0 0 4px;font-size:13px}.day h4 small{color:var(--muted);font-weight:400}
-.quick{display:flex;gap:6px;flex-wrap:wrap;padding:8px 6%}.quick button{border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:16px;padding:5px 11px;cursor:pointer;font-size:13px}
-form{display:flex;gap:8px;padding:10px 16px;background:var(--panel)}input{flex:1;border:1px solid var(--line);border-radius:20px;padding:10px 14px;background:var(--bg);color:var(--ink);font-size:15px}
-form button{background:var(--accent);color:#fff;border:0;border-radius:20px;padding:0 18px;font-weight:600;cursor:pointer}
-.info h2{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:14px 0 6px}.info p,.info li{font-size:13px;margin:4px 0}.info ul{padding-left:18px;margin:4px 0}
-.bar{display:flex;align-items:center;gap:8px;font-size:12px;margin:3px 0}.bar i{flex:1;height:6px;background:var(--line);border-radius:3px;overflow:hidden}.bar i b{display:block;height:100%;background:var(--accent)}
-.pp{border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin:6px 0;font-size:12.5px}.pp b{display:block;font-size:13px}
-code{font-size:11px;word-break:break-all}
-.card{background:var(--panel);border-bottom:1px solid var(--line);padding:12px 16px;display:grid;grid-template-columns:auto 1fr;gap:4px 14px}
-.av{width:46px;height:46px;border-radius:50%;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:17px;grid-row:span 3}
-.card .nm{font-weight:700;font-size:15px}.card .mt{color:var(--muted);font-size:12px}
-.kpis{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}.kpi{border:1px solid var(--line);border-radius:8px;padding:4px 10px;min-width:78px}.kpi b{display:block;font-size:15px}.kpi span{font-size:11px;color:var(--muted)}.kpi.warn b{color:var(--badink)}
-.tags{display:flex;gap:5px;flex-wrap:wrap;margin-top:4px}.tg{font-size:11px;padding:2px 8px;border-radius:10px;background:var(--chip);color:var(--ink)}.tg.neg{background:var(--bad);color:var(--badink)}.tg.pos{background:var(--good);color:var(--goodink)}.tg.off{opacity:.55;text-decoration:line-through}
-mark{border-radius:4px;padding:0 2px;cursor:help;color:inherit}mark.merchant{background:rgba(0,168,132,.22)}mark.trigger{background:rgba(59,130,246,.24)}mark.category{background:rgba(168,85,247,.22)}mark.customer{background:rgba(245,158,11,.28)}mark.derived{background:rgba(120,120,120,.2)}
-.legend{display:flex;gap:10px;flex-wrap:wrap;font-size:11px;color:var(--muted);margin:2px 0 8px}.legend mark{font-size:11px}
-.cmp{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:14px 0}.cmp>div{border-radius:10px;padding:10px 12px;background:var(--panel);border:1px solid var(--line)}.cmp h5{margin:0 0 6px;font-size:11px;text-transform:uppercase;letter-spacing:.05em}.cmp .g h5{color:var(--badink)}.cmp .y h5{color:var(--goodink)}.cmp p{margin:0 0 6px;font-size:13.5px}
-@media (max-width:700px){.cmp{grid-template-columns:1fr}}
-@media (max-width:1000px){.wrap{grid-template-columns:1fr;height:auto}aside{max-height:40vh}main{height:75vh}.info{border-left:0;border-top:1px solid var(--line)}}
+:root{--bg:#f0f2f5;--panel:#fff;--ink:#111b21;--muted:#667781;--line:#e9edef;--me:#d9fdd3;--them:#fff;--chat:#efeae2;--accent:#008069;--accent2:#25d366;--chip:#e7f5f1;--good:#e6f4ea;--goodink:#1e6b3a;--bad:#fde8ec;--badink:#b3163c;--btn:#027eb5;--shadow:0 1px .5px rgba(11,20,26,.13)}
+@media (prefers-color-scheme:dark){:root{--bg:#0c1317;--panel:#111b21;--ink:#e9edef;--muted:#8696a0;--line:#222d34;--me:#005c4b;--them:#202c33;--chat:#0b141a;--accent:#00a884;--chip:#1f2c33;--good:#12301f;--goodink:#7fd49b;--bad:#3a1520;--badink:#ff8fa6;--btn:#53bdeb}}
+*{box-sizing:border-box}html,body{height:100%}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+button{font:inherit}
+.app{display:flex;align-items:center;gap:14px;padding:10px 18px;background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap}
+.logo{width:38px;height:38px;border-radius:50%;background:radial-gradient(circle at 30% 30%,#1a8f7a,#0b4f45);color:#fff;font-weight:800;font-size:10px;display:flex;align-items:center;justify-content:center;letter-spacing:.04em}
+.brand b{display:block;font-size:16px}.brand span{color:var(--muted);font-size:12px}.sp{flex:1}
+.nav{display:flex;background:var(--bg);border-radius:20px;padding:3px}.nav button{border:0;background:transparent;color:var(--muted);padding:6px 14px;border-radius:16px;cursor:pointer;font-weight:600;font-size:13px}.nav button.on{background:var(--panel);color:var(--accent);box-shadow:var(--shadow)}
+select{background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:16px;padding:6px 10px;font-size:13px}
+.shell{display:grid;grid-template-columns:300px minmax(0,1fr);height:calc(100vh - 59px)}
+.shell.drawer{grid-template-columns:300px minmax(0,1fr) 340px}
+#side{background:var(--panel);border-right:1px solid var(--line);overflow:auto}
+.search{position:sticky;top:0;background:var(--panel);padding:10px 12px;border-bottom:1px solid var(--line);z-index:1}.search input{width:100%;border:0;background:var(--bg);color:var(--ink);border-radius:8px;padding:8px 12px;font-size:14px}
+.gh{padding:10px 16px 4px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--accent)}
+.row{display:flex;gap:10px;align-items:center;padding:9px 14px;cursor:pointer;border-bottom:1px solid var(--line)}.row:hover,.row.on{background:var(--chip)}
+.ra{width:36px;height:36px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;color:#fff}
+.row b{display:block;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.row span{display:block;color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.row .tx{min-width:0;flex:1}
+.pass{color:var(--goodink);font-weight:700;font-size:12px}
+.phone{display:flex;flex-direction:column;min-width:0;background:var(--chat);background-image:radial-gradient(rgba(0,0,0,.035) 1px,transparent 1px);background-size:18px 18px}
+.ch{display:flex;align-items:center;gap:12px;padding:9px 16px;background:var(--panel);border-bottom:1px solid var(--line)}
+.ch .logo{width:40px;height:40px}.ch b{font-size:16px}.ch .v{color:#1d9bf0;font-size:14px;display:inline}.ch #to{display:block;color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tool{border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:18px;padding:6px 12px;cursor:pointer;font-size:13px;font-weight:600}.tool:hover{border-color:var(--accent);color:var(--accent)}.tool.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+#log{flex:1;overflow:auto;padding:14px 7%}
+.chip{display:table;margin:10px auto;background:var(--panel);color:var(--muted);font-size:12px;padding:5px 12px;border-radius:8px;box-shadow:var(--shadow)}.chip.sys{color:var(--accent);max-width:88%;text-align:center}
+.b{width:fit-content;max-width:78%;border-radius:8px;margin:5px 0;box-shadow:var(--shadow);position:relative}.b .t{padding:7px 10px 4px;white-space:pre-wrap;word-wrap:break-word}
+.v{background:var(--them)}.u{background:var(--me);margin-left:auto}
+.tm{display:block;text-align:right;color:var(--muted);font-size:11px;padding:0 9px 5px}
+.bt{border-top:1px solid var(--line);display:flex}.bt button{flex:1;border:0;background:transparent;color:var(--btn);padding:9px;cursor:pointer;font-weight:600;font-size:14px}.bt button+button{border-left:1px solid var(--line)}.bt button:disabled{color:var(--muted);cursor:default}
+.post{max-width:380px;margin:4px 10px 8px;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--panel)}.post img{display:block;width:100%;max-height:190px;object-fit:cover}.post .pl{font-size:11px;color:var(--muted);padding:6px 10px 0;text-transform:uppercase;letter-spacing:.05em}.post .pt{padding:4px 10px 9px;font-size:14px}
+.u img{display:block;max-width:260px;border-radius:6px;margin:4px}
+.why{border:0;background:none;color:var(--muted);font-size:11px;cursor:pointer;padding:0 9px 5px}.why:hover{color:var(--accent)}
+form{display:flex;gap:8px;align-items:center;padding:9px 14px;background:var(--panel)}
+.ic{width:40px;height:40px;border-radius:50%;border:0;background:transparent;color:var(--muted);cursor:pointer;font-size:20px}.ic:hover{background:var(--bg)}
+#in{flex:1;border:0;border-radius:22px;padding:11px 16px;background:var(--bg);color:var(--ink);font-size:15px}
+.send{width:44px;height:44px;border-radius:50%;border:0;background:var(--accent);color:#fff;cursor:pointer;font-size:18px}
+.send:disabled,.ic:disabled{opacity:.4;cursor:default}
+.empty{max-width:560px;margin:6vh auto;text-align:center}.empty h2{margin:.2em 0}.empty p{color:var(--muted)}
+.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:18px 0}.step{background:var(--panel);border-radius:12px;padding:14px;text-align:left;box-shadow:var(--shadow)}.step b{display:block;margin:4px 0}.step span{color:var(--muted);font-size:13px}.step i{font-style:normal;font-size:22px}
+.cta{background:var(--accent);color:#fff;border:0;border-radius:22px;padding:10px 20px;font-weight:700;cursor:pointer}
+#drawer{background:var(--panel);border-left:1px solid var(--line);overflow:auto;display:none}.shell.drawer #drawer{display:block}
+.dh{display:flex;align-items:center;padding:12px 16px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--panel)}.dh b{flex:1}.dh button{border:0;background:none;color:var(--muted);font-size:20px;cursor:pointer}
+.sec{padding:12px 16px;border-bottom:1px solid var(--line)}.sec h4{margin:0 0 8px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}.sec p{margin:4px 0;font-size:13.5px}
+.kp{display:grid;grid-template-columns:1fr 1fr;gap:6px}.kp div{background:var(--bg);border-radius:8px;padding:6px 9px}.kp b{display:block;font-size:15px}.kp span{font-size:11px;color:var(--muted)}.kp .warn b{color:var(--badink)}
+.tags{display:flex;flex-wrap:wrap;gap:5px}.tg{font-size:11.5px;padding:3px 8px;border-radius:10px;background:var(--chip)}.tg.pos{background:var(--good);color:var(--goodink)}.tg.neg{background:var(--bad);color:var(--badink)}.tg.off{text-decoration:line-through;opacity:.6}
+.bar{display:flex;align-items:center;gap:8px;font-size:12px;margin:4px 0}.bar i{flex:1;height:6px;background:var(--line);border-radius:3px;overflow:hidden}.bar i b{display:block;height:100%;background:var(--accent)}
+.fact{font-size:12.5px;margin:5px 0}.fact code{font-size:11px;color:var(--muted);word-break:break-all;display:block}
+mark{border-radius:3px;padding:0 1px;color:inherit}mark.merchant{background:rgba(0,168,132,.25)}mark.trigger{background:rgba(59,130,246,.25)}mark.category{background:rgba(168,85,247,.24)}mark.customer{background:rgba(245,158,11,.3)}mark.derived{background:rgba(120,120,120,.22)}
+.sw{display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer}
+.cmp{display:grid;gap:8px}.cmp div{border-radius:8px;padding:8px 10px;font-size:13px}.cmp .g{background:var(--bad)}.cmp .y{background:var(--good)}.cmp small{display:block;font-weight:700;font-size:11px;margin-bottom:3px}
+.verdict{display:table;margin:14px auto;padding:9px 16px;border-radius:10px;font-weight:700}.verdict.ok{background:var(--good);color:var(--goodink)}.verdict.no{background:var(--bad);color:var(--badink)}
+.day{background:var(--them);border-radius:10px;padding:10px 12px;margin:10px 0;box-shadow:var(--shadow)}.day h5{margin:0 0 4px;font-size:13px}.day h5 small{color:var(--muted);font-weight:400}
+#pick{display:none}
+@media (max-width:900px){.shell,.shell.drawer{grid-template-columns:1fr}#side{display:none}#pick{display:block;max-width:60vw}#drawer{position:fixed;inset:59px 0 0 12%;z-index:5;box-shadow:-4px 0 18px rgba(0,0,0,.2)}.steps{grid-template-columns:1fr}#log{padding:12px 3%}.b{max-width:90%}}
 </style></head><body>
-<div class="top"><div><b>Vera — multi-agent demo</b><div class="sub">Real pipeline · official dataset · every fact verified against context</div></div><div class="sp"></div>
-<span class="sub">Message language</span><div class="seg" id="lang"><button data-l="auto" class="on" title="From the merchant/customer profile">Auto</button><button data-l="en">English</button><button data-l="hi-en">Hinglish</button><button data-l="hi">हिन्दी</button></div></div>
-<div class="wrap">
-<aside><div class="tabs"><button data-t="sc" class="on">30 test scenarios</button><button data-t="rp">Judge replays</button><button data-t="wk">Weekly plan</button></div><div id="side"></div></aside>
-<main>
- <div id="card"></div><div class="head"><b id="who">Pick a scenario, a judge replay, or a weekly plan</b><span id="sub">Vera writes the first message; you reply as the merchant (or customer).</span></div>
- <div id="log"></div><div class="quick" id="quick"></div>
- <form id="f"><input id="in" placeholder="Reply…" autocomplete="off" disabled><button id="send" disabled>Send</button></form>
-</main>
-<div class="info" id="info"></div>
+<header class="app"><div class="logo">VERA</div><div class="brand"><b>Vera by magicpin</b><span>AI assistant for local merchants on WhatsApp — live demo</span></div>
+<div class="nav" id="nav"><button data-m="chat" class="on">💬 Live chat</button><button data-m="tests">🧪 Judge tests</button><button data-m="week">📅 Weekly plan</button></div>
+<div class="sp"></div><select id="pick"></select>
+<select id="lang" title="Message language"><option value="auto">🌐 Auto (from profile)</option><option value="en">English</option><option value="hi-en">Hinglish</option><option value="hi">हिन्दी</option></select></header>
+<div class="shell" id="shell">
+<nav id="side"></nav>
+<section class="phone">
+ <div class="ch"><div class="logo">VERA</div><div style="flex:1;min-width:0"><b>magicpin</b> <span class="v">✔</span><span id="to">Pick a merchant to start</span></div>
+  <button class="tool" id="dealsBtn" hidden>🏷 Deals</button><button class="tool" id="insBtn" hidden>ⓘ Insights</button></div>
+ <div id="log"></div>
+ <form id="f"><button type="button" class="ic" id="att" title="Attach a photo" disabled>📎</button><input type="file" id="file" accept="image/*" hidden>
+  <input id="in" placeholder="Pick a merchant first…" autocomplete="off" disabled><button class="send" id="send" disabled>➤</button></form>
+</section>
+<aside id="drawer"></aside>
 </div>
 <script>
-const $=s=>document.querySelector(s);let sid=null,SC=[],cur=null,LANG='auto',TAB='sc';
-const QUICK=["How much will this cost?","ok lets do it","what is this about?","Thank you for contacting us! Our team will respond shortly.","busy, call me tomorrow","can you help me file my GST?","not interested","haan karo"];
-const REPLAYS=[["auto_reply","Auto-reply hell","Same canned WhatsApp auto-reply 4× in a row"],["intent","Intent transition","2 qualifying turns, then “ok let's do it”"],["join","“I want to join”","Explicit intent on the very first reply"],["hostile","Hostile + off-topic","Abuse, then a GST question"],["stop","STOP","Hard opt-out"],["curveballs","Curveball questions","Who are you? · Which competitor? · What is CTR? · How many customers? · commission · schedule"],["language","Language switch","Merchant replies in Hinglish"]];
-const PAINS=[["Auto-reply pollution","Canned replies detected by phrasing + verbatim repeats (tracked per merchant, even across conversations). One owner-directed nudge, then exit.","auto_reply"],["Intent-handoff failures","“yes / go ahead / ok let's do it / judna hai” routes straight to ACT and delivers the draft — never back to qualifying.","intent"],["Generic copy","Offers ranked service+price first (“Dental Cleaning @ ₹299”); a deterministic checker rejects invented “X% off” claims.",null],["Low engagement frequency","A portfolio of different conversation types — research, trends, curiosity asks, CDE, events — not just reminders.","week"]];
-function esc(s){return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
-function add(text,cls,meta){const d=document.createElement('div');d.className='m '+cls;d.textContent=text;if(meta){const s=document.createElement('span');s.className='meta';s.textContent=meta;d.appendChild(s)}$('#log').appendChild(d);$('#log').scrollTop=1e9;return d}
-function sys(t,cls){const d=document.createElement('div');d.className=cls||'sys';d.textContent=t;$('#log').appendChild(d);$('#log').scrollTop=1e9}
-function hl(text,spans){const t=String(text);const taken=new Array(t.length).fill(false);const marks=[];
- (spans||[]).forEach(s=>{let i=t.indexOf(s.text);while(i>=0){let free=true;for(let k=i;k<i+s.text.length;k++)if(taken[k]){free=false;break}
-  if(free){for(let k=i;k<i+s.text.length;k++)taken[k]=true;marks.push([i,i+s.text.length,s]);break}i=t.indexOf(s.text,i+1)}});
- marks.sort((a,b)=>a[0]-b[0]);let out='',p=0;marks.forEach(([a,b,s])=>{out+=esc(t.slice(p,a))+`<mark class="${s.layer}" title="${esc(s.source)}">${esc(t.slice(a,b))}</mark>`;p=b});return out+esc(t.slice(p))}
-function card(p){if(!p){$('#card').innerHTML='';return}const ini=(p.owner||p.name||'?').replace(/^Dr\.?\s*/,'').slice(0,2).toUpperCase();
- const cu=p.customer;let h=`<div class="av">${esc(ini)}</div><div><span class="nm">${esc(p.name)}</span> <span class="mt">· ${esc(p.category)} · ${esc(p.locality||'')}, ${esc(p.city||'')} · ${p.verified?'✔ verified':'not verified'} · ${esc(p.plan)} · speaks ${esc((p.languages||[]).join(', '))}</span></div>`;
- h+=`<div class="kpis">${p.kpis.map(k=>`<div class="kpi${k.warn?' warn':''}"><b>${esc(k.value)}</b><span>${esc(k.label)} · ${esc(k.sub)}</span></div>`).join('')}</div>`;
- h+=`<div class="tags">${p.offers.map(o=>`<span class="tg${o.status==='active'?'':' off'}">🏷 ${esc(o.title)}</span>`).join('')}${p.reviews.map(r=>`<span class="tg ${r.sentiment==='pos'?'pos':r.sentiment==='neg'?'neg':''}">★ ${esc(r.theme)}</span>`).join('')}${p.signals.map(s=>`<span class="tg">⚑ ${esc(s)}</span>`).join('')}</div>`;
- if(cu)h+=`<div></div><div class="tags"><span class="tg" style="background:#fff3d6;color:#8a5a00">👤 Customer: ${esc(cu.name)} · ${esc(cu.state)} · ${cu.visits||0} visits · last ${esc(cu.last_visit||'')}${cu.slots?' · prefers '+esc(cu.slots):''} · lang ${esc(cu.language||'')}</span><span class="tg pos">✓ consent: ${esc((cu.consent||[]).join(', ')||'none')}</span></div>`;
- $('#card').innerHTML=`<div class="card">${h}</div>`}
-function enable(on){$('#in').disabled=!on;$('#send').disabled=!on}
+const $=s=>document.querySelector(s);let SC=[],cur=null,sid=null,MODE='chat',LANG='auto',LAST=null,HL=false;
+const COLORS=['#00a884','#027eb5','#7c5cff','#e67e22','#c0392b','#16a085','#8e44ad','#2c3e50'];
+const color=s=>COLORS[[...String(s)].reduce((a,c)=>a+c.charCodeAt(0),0)%COLORS.length];
+const ini=n=>String(n||'?').replace(/^Dr\.?\s*/,'').split(/\s+/).map(w=>w[0]).join('').slice(0,2).toUpperCase();
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const now=()=>new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
 async function post(u,b){return (await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)})).json()}
-function pains(extra){return '<h2>Production pain points → how this bot handles them</h2>'+PAINS.map(p=>`<div class="pp"><b>${p[0]}</b>${p[1]}${p[2]?` <a href="#" onclick="${p[2]=='week'?"tab('wk');return false":"runReplay('"+p[2]+"');return false"}">See it →</a>`:''}</div>`).join('')+(extra||'')}
-function infoDefault(){$('#info').innerHTML='<h2>What you are looking at</h2><p>Every message is produced by the agent pipeline: context analyst → trigger analyst → strategy planner → composer → <b>deterministic fact &amp; policy checkers</b> → critic → finalizer.</p><p><b>Two audiences:</b> <span class="pill">Vera → owner</span> coaches the merchant; <span class="pill cust">→ customer</span> is sent on the merchant\'s behalf (consent checked).</p>'+pains()}
-function side(){const el=$('#side');el.innerHTML='';
- if(TAB==='sc'){const groups={};SC.forEach(x=>(groups[x.group]=groups[x.group]||[]).push(x));
-  Object.entries(groups).forEach(([g,xs])=>{el.insertAdjacentHTML('beforeend',`<div class="gh">${esc(g)} · ${xs.length}</div>`);
-   xs.forEach(x=>{const d=document.createElement('div');d.className='sc'+(cur&&cur.id===x.id?' on':'');
-    d.innerHTML=`<b>${x.id} · ${esc(x.merchant)}</b><span>${esc(x.kind)} · ${esc(x.category)} ${x.audience==='customer'?'<i class="pill cust">→ customer '+esc(x.to||'')+'</i>':'<i class="pill">Vera → owner</i>'}${x.placeholder?'<i class="pill" title="Trigger has no payload: composed from merchant data only">no-payload</i>':''}</span>`;
-    d.onclick=()=>start(x);el.appendChild(d)})})}
- else if(TAB==='rp'){el.insertAdjacentHTML('beforeend','<div class="gh">Judge replay tests (phase 4) · click to run live</div>');
-  REPLAYS.forEach(r=>el.insertAdjacentHTML('beforeend',`<div class="rp"><b>${r[1]}</b><span>${r[2]}</span><button class="btn" onclick="runReplay('${r[0]}')">Run test</button></div>`));
-  el.insertAdjacentHTML('beforeend','<div class="gh">Post-submission twist (§8)</div><div class="rp"><b>Context injection</b><span>New digest item, shifted metrics, customer added mid-test — before vs after</span><button class="btn" onclick="runInject()">Run test</button></div>')}
- else{el.insertAdjacentHTML('beforeend','<div class="gh">Weekly conversation plan · pick a merchant</div>');
-  const seen=new Set();SC.filter(x=>x.audience==='merchant'&&!seen.has(x.merchant_id)&&seen.add(x.merchant_id)).forEach(x=>{const d=document.createElement('div');d.className='sc';d.innerHTML=`<b>${esc(x.merchant)}</b><span>${esc(x.category)}</span>`;d.onclick=()=>week(x);el.appendChild(d)})}}
-function tab(t){TAB=t;document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('on',b.dataset.t===t));side()}
-async function start(x){cur=x;side();$('#log').innerHTML='';enable(false);$('#quick').innerHTML='';
- $('#who').textContent=x.id+' · '+x.merchant;$('#sub').textContent=(x.audience==='customer'?'Sent to customer '+(x.to||'')+' on behalf of the merchant':'Vera → owner '+(x.to||''))+' · trigger: '+x.kind;
- sys('Running the agent pipeline…');const r=await post('/demo/api/start',{trigger_id:x.trigger_id,customer_id:x.customer_id,language:LANG});
- $('#log').innerHTML='';sid=r.session_id;card(r.profile);
- $('#log').insertAdjacentHTML('beforeend','<div class="legend">Highlighted = pulled from context (hover for the exact field): <mark class="merchant">this merchant</mark><mark class="trigger">today\'s trigger</mark><mark class="category">category knowledge</mark><mark class="customer">customer</mark><mark class="derived">computed</mark></div>');
- const d=add('','v','cta='+r.cta+' · send_as='+r.send_as+' · language='+r.language);d.innerHTML=hl(r.body,r.highlights)+d.innerHTML;
- const b=document.createElement('div');b.className='badges';b.innerHTML=(r.badges||[]).map(x=>`<span class="bd${x.ok?'':' no'}">${x.ok?'✓':'✗'} ${esc(x.label)}</span>`).join('');d.after(b);
- const nf=(r.highlights||[]).length;b.insertAdjacentHTML('afterend',`<div class="cmp"><div class="g"><h5>Typical generic message</h5><p>${esc(r.generic)}</p><div class="badges"><span class="bd no">✗ No trigger</span><span class="bd no">✗ No merchant fact</span><span class="bd no">✗ No category voice</span><span class="bd no">✗ Generic % off</span></div></div><div class="y"><h5>Vera — personalised</h5><p>${nf} facts from this merchant's context, written in ${({en:'English','hi-en':'Hinglish',hi:'Hindi'})[r.language]||r.language}, anchored on today's “${esc(r.trigger_kind.replace(/_/g,' '))}” trigger.</p><div class="badges">${(r.badges||[]).filter(x=>x.ok).slice(0,4).map(x=>`<span class="bd">✓ ${esc(x.label)}</span>`).join('')}</div></div></div>`);
- $('#in').placeholder=x.audience==='customer'?'Reply as the customer…':'Reply as the merchant…';enable(true);
- const langWhy=LANG==='hi'&&x.audience!=='customer'?'You chose हिन्दी. Devanagari is used for customer messages; merchant messages use Hinglish (Roman-script Hindi), the way owners text on WhatsApp.':LANG!=='auto'?'You chose '+LANG+'.':(x.audience==='customer'?'Auto: customer profile language_pref = '+(x.customer_lang||'n/a')+'.':'Auto: merchant profile languages = ['+(x.languages||[]).join(', ')+'] → '+(r.language==='hi-en'?'Hinglish (brief: code-mix preferred when “hi” is listed)':r.language)+'.');
- const sc=r.scores||{};$('#info').innerHTML='<h2>Why this message</h2><p>'+esc(r.rationale)+'</p><h2>Language</h2><p>'+esc(langWhy)+' Use the switch at the top to change it.</p>'+(r.placeholder?'<h2>No-payload trigger</h2><p>This test trigger carries no data, so Vera used only this merchant\'s own facts — nothing invented.</p>':'')+'<h2>Critic scores (0-10)</h2>'+Object.entries(sc).map(([k,v])=>`<div class="bar">${k.replace('_',' ')}<i><b style="width:${v*10}%"></b></i>${v}</div>`).join('')+
- '<h2>Facts used (source paths)</h2><ul>'+(r.facts_used||[]).map(f=>'<li><code>'+esc(f)+'</code></li>').join('')+'</ul><h2>Suppression key</h2><p><code>'+esc(r.suppression_key)+'</code></p>'+pains();
- (x.audience==='customer'?["1","YES","can I come on Saturday?","STOP"]:QUICK).forEach(q=>{const bt=document.createElement('button');bt.type='button';bt.textContent=q;bt.onclick=()=>send(q);$('#quick').appendChild(bt)})}
-async function send(text){if(!sid||!text.trim())return;add(text,'u');$('#in').value='';const r=await post('/demo/api/reply',{session_id:sid,message:text});
- if(r.error){sys(r.error);return}if(r.action==='send')add(r.body,'v',r.rationale);else if(r.action==='wait')sys('⏸ Vera waits '+Math.round(r.wait_seconds/60)+' min — '+r.rationale);else{sys('🔚 Conversation ended — '+r.rationale);enable(false)}}
-async function runReplay(name){sid=null;card(null);enable(false);$('#quick').innerHTML='';$('#log').innerHTML='';sys('Running judge replay…');
- const r=await post('/demo/api/replay',{name,trigger_id:cur&&cur.audience==='merchant'?cur.trigger_id:null,language:LANG});$('#log').innerHTML='';
- $('#who').textContent='Judge replay · '+r.title;$('#sub').textContent=r.merchant+' · tests: '+r.pain;sys('Expected: '+r.expect);add(r.opening,'v','Vera opens');
- r.turns.forEach(t=>{add(t.merchant,'u','judge (as merchant)');if(t.action==='send')add(t.body,'v',t.rationale);else if(t.action==='wait')sys('⏸ wait '+Math.round(t.wait_seconds/60)+' min — '+t.rationale);else sys('🔚 end — '+t.rationale)});
- sys((r.pass?'✅ PASS — ':'❌ FAIL — ')+r.verdict,'verdict '+(r.pass?'pass':'fail'));
- $('#info').innerHTML='<h2>Replay test</h2><p><b>'+esc(r.title)+'</b>: '+esc(r.expect)+'</p><p>Result: <b>'+(r.pass?'PASS':'FAIL')+'</b> — '+esc(r.verdict)+'</p>'+pains()}
-async function runInject(){sid=null;card(null);enable(false);$('#quick').innerHTML='';$('#log').innerHTML='';sys('Injecting new context…');
- const r=await post('/demo/api/inject',{language:LANG});$('#log').innerHTML='';$('#who').textContent='Post-submission context injection';$('#sub').textContent='Same merchants, before vs after the judge pushes new data';
- r.steps.forEach(s=>{$('#log').insertAdjacentHTML('beforeend',`<div class="sys"><b>${esc(s.what)}</b></div>`);add(s.before,'v','BEFORE');add(s.after,'v','AFTER — adapted, nothing invented')});
- $('#info').innerHTML='<h2>What the judge does</h2><p>After submission it pushes new digest items, updated performance, new triggers, and customer contexts for 5 pairs. Bots that adapt without hallucinating score higher.</p><h2>What changed here</h2><ul><li>New research item → cited with its source, n and next step</li><li>New numbers → message recomputed, old numbers gone</li><li>Customer added → message re-addressed to the customer; competitor intel withheld</li></ul>'+pains()}
-async function week(x){sid=null;card(null);enable(false);$('#quick').innerHTML='';$('#log').innerHTML='';sys('Planning a week of conversations…');
- const r=await post('/demo/api/portfolio',{merchant_id:x.merchant_id,language:LANG});$('#log').innerHTML='';
- $('#who').textContent='Weekly plan · '+r.merchant;$('#sub').textContent='Different conversation types, not just reminders';
- r.week.forEach(w=>$('#log').insertAdjacentHTML('beforeend',`<div class="day"><h4>${w.day} · ${esc(w.kind)} <small>· ${esc(w.group)} · ${esc(w.source)}</small></h4>${esc(w.body).replace(/\n/g,'<br>')}</div>`));
- $('#info').innerHTML='<h2>Why a portfolio</h2><p>Functional nudges (renewal, profile) are rare. Engaging a merchant 3-5×/week needs knowledge- and curiosity-driven conversations. This plan mixes the merchant\'s real triggers with touches generated only from the category knowledge pack (digest, trends, CDE, curiosity asks) — each one fact-checked.</p><p>'+r.week.length+' distinct conversation types this week.</p>'+pains()}
-document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>tab(b.dataset.t));
-document.querySelectorAll('#lang button').forEach(b=>b.onclick=()=>{LANG=b.dataset.l;document.querySelectorAll('#lang button').forEach(x=>x.classList.toggle('on',x===b));if(cur&&TAB==='sc')start(cur)});
+const TESTS=[["auto_reply","Auto-reply hell","Same canned auto-reply 4× in a row"],["intent","Intent transition","Qualifying turns, then “ok let's do it”"],["join","“I want to join”","Explicit intent on the first reply"],["hostile","Hostile + off-topic","Abuse, then a GST question"],["stop","STOP","Hard opt-out"],["curveballs","Curveball questions","Who are you? · Which competitor? · CTR? · results?"],["language","Language switch","Merchant replies in Hinglish"],["inject","Context injection (§8 twist)","New digest item, new numbers, a customer added"]];
+
+function input(on,ph){$('#in').disabled=!on;$('#send').disabled=!on;$('#att').disabled=!on||!(cur&&cur.audience==='merchant');$('#in').placeholder=ph||'Type a message';}
+function header(to,tools){$('#to').textContent=to;$('#dealsBtn').hidden=!tools;$('#insBtn').hidden=!tools}
+function drawer(open){$('#shell').classList.toggle('drawer',open);$('#insBtn').classList.toggle('on',open)}
+function scrollEnd(){$('#log').scrollTop=1e9}
+function chip(t,cls){$('#log').insertAdjacentHTML('beforeend',`<div class="chip ${cls||''}">${t}</div>`);scrollEnd()}
+
+function hl(text,spans){const t=String(text),taken=new Array(t.length).fill(false),m=[];
+ (spans||[]).forEach(s=>{let i=t.indexOf(s.text);while(i>=0){let ok=true;for(let k=i;k<i+s.text.length;k++)if(taken[k]){ok=false;break}
+  if(ok){for(let k=i;k<i+s.text.length;k++)taken[k]=true;m.push([i,i+s.text.length,s]);break}i=t.indexOf(s.text,i+1)}});
+ m.sort((a,b)=>a[0]-b[0]);let o='',p=0;m.forEach(([a,b,s])=>{o+=esc(t.slice(p,a))+`<mark class="${s.layer}" title="${esc(s.source)}">${esc(t.slice(a,b))}</mark>`;p=b});return o+esc(t.slice(p))}
+
+function vera(r,{spans=null,first=false}={}){const body=r.body||'';const [pre,draft]=body.split(/Draft post ↓\n|draft post ↓\n/);
+ let main=pre,rest='';if(draft!==undefined){const i=draft.lastIndexOf('\n');rest=i>=0?draft.slice(i+1):'';main=pre}
+ let h=`<div class="t">${spans?hl(main,spans):esc(main)}</div>`;
+ if(draft!==undefined){const txt=draft.split('\n').slice(0,-1).join('\n')||draft;h+=`<div class="post">${r.draft_image?`<img src="${r.draft_image}" alt="attached photo">`:''}<div class="pl">📍 Google post preview</div><div class="pt">${esc(txt)}</div></div>`+(rest?`<div class="t">${esc(rest)}</div>`:'')}
+ h+=`<span class="tm">${now()}</span>`;if(first)h+=`<button class="why" onclick="drawer(true);return false">ⓘ How Vera wrote this</button>`;
+ if(r.buttons&&r.buttons.length)h+=`<div class="bt">${r.buttons.map(b=>`<button type="button">${esc(b)}</button>`).join('')}</div>`;
+ const d=document.createElement('div');d.className='b v';d.innerHTML=h;$('#log').appendChild(d);
+ d.querySelectorAll('.bt button').forEach(bt=>bt.onclick=()=>{d.querySelectorAll('.bt button').forEach(x=>x.disabled=true);send(bt.textContent)});scrollEnd();return d}
+function me(text,img){const d=document.createElement('div');d.className='b u';d.innerHTML=(img?`<img src="${img}" alt="photo">`:'')+(text?`<div class="t">${esc(text)}</div>`:'')+`<span class="tm">${now()} ✓✓</span>`;$('#log').appendChild(d);scrollEnd()}
+function handle(r){if(r.error){chip(esc(r.error),'sys');return}
+ if(r.action==='send')vera(r);else if(r.action==='wait')chip(`⏸ Vera pauses for ${Math.round(r.wait_seconds/60)} min — ${esc(r.rationale)}`,'sys');
+ else{chip(`🔚 ${esc(r.rationale)}`,'sys');input(false,'Conversation closed — pick another merchant')}}
+
+// ---------- side lists
+function side(){const el=$('#side'),pk=$('#pick');let h='',opts='<option value="">Choose…</option>';
+ if(MODE==='chat'){h+=`<div class="search"><input id="q" placeholder="🔍 Search merchants or triggers"></div><div id="rows"></div>`;el.innerHTML=h;
+  const draw=()=>{const q=($('#q').value||'').toLowerCase();let r='',g='';SC.filter(x=>(x.merchant+x.kind+x.category+x.id+(x.to||'')).toLowerCase().includes(q)).forEach(x=>{
+   if(x.group!==g){g=x.group;r+=`<div class="gh">${esc(g)}</div>`}
+   r+=`<div class="row${cur&&cur.id===x.id?' on':''}" data-id="${x.id}"><div class="ra" style="background:${color(x.merchant)}">${ini(x.merchant)}</div><div class="tx"><b>${esc(x.merchant)}</b><span>${x.audience==='customer'?'👤 to '+esc(x.to)+' · ':''}${esc(x.kind)} · ${esc(x.category)}</span></div></div>`});
+   $('#rows').innerHTML=r;document.querySelectorAll('.row').forEach(n=>n.onclick=()=>start(SC.find(x=>x.id===n.dataset.id)))};
+  $('#q').oninput=draw;draw();SC.forEach(x=>opts+=`<option value="${x.id}">${x.id} · ${esc(x.merchant)} — ${esc(x.kind)}</option>`)}
+ else if(MODE==='tests'){h='<div class="gh">What the judge runs</div>'+TESTS.map(t=>`<div class="row" data-t="${t[0]}"><div class="ra" style="background:${color(t[1])}">🧪</div><div class="tx"><b>${t[1]}</b><span>${t[2]}</span></div><span class="pass" id="res_${t[0]}"></span></div>`).join('');
+  el.innerHTML=h;document.querySelectorAll('.row').forEach(n=>n.onclick=()=>n.dataset.t==='inject'?runInject():runTest(n.dataset.t));TESTS.forEach(t=>opts+=`<option value="${t[0]}">${t[1]}</option>`)}
+ else{const seen=new Set();const ms=SC.filter(x=>x.audience==='merchant'&&!seen.has(x.merchant_id)&&seen.add(x.merchant_id));
+  el.innerHTML='<div class="gh">Pick a merchant</div>'+ms.map(x=>`<div class="row" data-m="${x.merchant_id}"><div class="ra" style="background:${color(x.merchant)}">${ini(x.merchant)}</div><div class="tx"><b>${esc(x.merchant)}</b><span>${esc(x.category)}</span></div></div>`).join('');
+  document.querySelectorAll('.row').forEach(n=>n.onclick=()=>week(SC.find(x=>x.merchant_id===n.dataset.m)));ms.forEach(x=>opts+=`<option value="${x.merchant_id}">${esc(x.merchant)}</option>`)}
+ pk.innerHTML=opts}
+$('#pick').onchange=e=>{const v=e.target.value;if(!v)return;if(MODE==='chat')start(SC.find(x=>x.id===v));else if(MODE==='tests')(v==='inject'?runInject():runTest(v));else week(SC.find(x=>x.merchant_id===v))};
+
+// ---------- views
+function empty(){cur=null;sid=null;header('Pick a merchant to start',false);drawer(false);input(false,'Pick a merchant first…');
+ $('#log').innerHTML=`<div class="empty"><div class="logo" style="width:64px;height:64px;margin:auto;font-size:14px">VERA</div><h2>Vera, magicpin's merchant assistant</h2>
+ <p>Every message is written by a team of AI agents from the merchant's real data — and every number is checked before it's sent.</p>
+ <div class="steps"><div class="step"><i>1️⃣</i><b>Pick a merchant</b><span>Vera writes today's message from their data and the day's trigger.</span></div>
+ <div class="step"><i>2️⃣</i><b>Reply like the owner</b><span>Try “yes”, an auto-reply, a question — or 📎 a dish photo.</span></div>
+ <div class="step"><i>3️⃣</i><b>Open ⓘ Insights</b><span>See why Vera said it and where every fact came from.</span></div></div>
+ <button class="cta" onclick="start(SC.find(x=>x.id==='T09'))">Try it: Dr. Meera's clinic →</button></div>`}
+async function start(x){if(!x)return;MODE='chat';cur=x;side();$('#log').innerHTML='';drawer(false);
+ header(x.audience==='customer'?`to ${x.to} · on behalf of ${x.merchant}`:`to ${x.merchant} · ${x.category}`,true);$('#dealsBtn').textContent=x.audience==='customer'?'🏷 Send deals':'🏷 Deals';
+ chip('Today');chip('Vera works for magicpin · every fact is verified against the merchant\'s data','sys');chip('Writing…');
+ const r=await post('/demo/api/start',{trigger_id:x.trigger_id,customer_id:x.customer_id,language:LANG});$('#log').lastChild.remove();
+ sid=r.session_id;LAST=r;vera(r,{first:true});input(true,x.audience==='customer'?`Reply as ${x.to}…`:`Reply as ${x.to||'the owner'}…`);insights()}
+async function send(text,img){if(!sid||(!text.trim()&&!img))return;me(text,img);$('#in').value='';handle(await post('/demo/api/reply',{session_id:sid,message:text,image:img||null}))}
+async function deals(){if(!sid)return;handle(await post('/demo/api/deals',{session_id:sid}))}
+function insights(){const r=LAST;if(!r)return;const p=r.profile||{};const cu=p.customer;
+ let h=`<div class="dh"><b>ⓘ How Vera wrote this</b><button onclick="drawer(false)">×</button></div>`;
+ h+=`<div class="sec"><h4>Why this message, why now</h4><p>${esc(r.rationale.split('. Levers')[0])}.</p><p style="color:var(--muted);font-size:12px">Trigger: ${esc(r.trigger_kind.replace(/_/g,' '))}${r.placeholder?' (no payload — built from the merchant\'s own data)':''} · Language: ${esc(({en:'English','hi-en':'Hinglish',hi:'Hindi'})[r.language]||r.language)}</p></div>`;
+ h+=`<div class="sec"><h4>Personalisation</h4><label class="sw"><input type="checkbox" id="hlsw" ${HL?'checked':''}> Highlight facts in the chat</label>${(r.highlights||[]).slice(0,8).map(f=>`<div class="fact"><mark class="${f.layer}">${esc(f.text)}</mark><code>${esc(f.source)}</code></div>`).join('')}</div>`;
+ h+=`<div class="sec"><h4>${esc(p.name)}</h4><p style="color:var(--muted);font-size:12px">${esc(p.locality||'')}, ${esc(p.city||'')} · ${p.verified?'✔ verified':'not verified'} · ${esc(p.plan)}</p><div class="kp">${(p.kpis||[]).map(k=>`<div class="${k.warn?'warn':''}"><b>${esc(k.value)}</b><span>${esc(k.label)} · ${esc(k.sub)}</span></div>`).join('')}</div>
+  <div class="tags" style="margin-top:8px">${(p.offers||[]).map(o=>`<span class="tg${o.status==='active'?'':' off'}">🏷 ${esc(o.title)}</span>`).join('')}${(p.reviews||[]).map(v=>`<span class="tg ${v.sentiment==='pos'?'pos':v.sentiment==='neg'?'neg':''}">★ ${esc(v.theme)}</span>`).join('')}</div>
+  ${cu?`<p style="margin-top:8px">👤 <b>${esc(cu.name)}</b> · ${esc(cu.state)} · ${cu.visits||0} visits · last ${esc(cu.last_visit||'')}${cu.slots?' · prefers '+esc(cu.slots):''}</p><div class="tags"><span class="tg pos">consent: ${esc((cu.consent||[]).join(', ')||'none')}</span></div>`:''}</div>`;
+ h+=`<div class="sec"><h4>Quality checks</h4><div class="tags">${(r.badges||[]).map(b=>`<span class="tg ${b.ok?'pos':'neg'}">${b.ok?'✓':'✗'} ${esc(b.label)}</span>`).join('')}</div><div style="margin-top:8px">${Object.entries(r.scores||{}).map(([k,v])=>`<div class="bar">${k.replace('_',' ')}<i><b style="width:${v*10}%"></b></i>${v}</div>`).join('')}</div></div>`;
+ h+=`<div class="sec"><h4>Generic vs Vera</h4><div class="cmp"><div class="g"><small>✗ TYPICAL GENERIC</small>${esc(r.generic)}</div><div class="y"><small>✓ VERA</small>${(r.highlights||[]).length} facts from this merchant's data, anchored on today's trigger, one clear ask.</div></div></div>`;
+ $('#drawer').innerHTML=h;$('#hlsw').onchange=e=>{HL=e.target.checked;const first=document.querySelector('#log .b.v .t');if(first)first.innerHTML=HL?hl(LAST.body.split(/Draft post ↓\n/)[0],LAST.highlights):esc(LAST.body.split(/Draft post ↓\n/)[0])}}
+async function runTest(name){MODE='tests';side();sid=null;input(false,'Judge test — read-only');$('#log').innerHTML='';header('Judge test · judge plays the merchant',false);chip('Running…');
+ const r=await post('/demo/api/replay',{name,language:LANG});$('#log').innerHTML='';header(`Judge test · ${r.title}`,false);chip(esc(r.merchant));chip('Expected: '+esc(r.expect),'sys');vera({body:r.opening});
+ r.turns.forEach(t=>{me(t.merchant);handle({...t,buttons:[]})});$('#log').insertAdjacentHTML('beforeend',`<div class="verdict ${r.pass?'ok':'no'}">${r.pass?'✅ PASS':'❌ FAIL'} — ${esc(r.verdict)}</div>`);scrollEnd();
+ const el=$('#res_'+name);if(el)el.textContent=r.pass?'PASS':'FAIL';
+ $('#drawer').innerHTML=`<div class="dh"><b>🧪 ${esc(r.title)}</b><button onclick="drawer(false)">×</button></div><div class="sec"><h4>What the judge checks</h4><p>${esc(r.expect)}</p><p><b>${r.pass?'PASS':'FAIL'}</b> — ${esc(r.verdict)}</p></div><div class="sec"><h4>Production pain point</h4><p>${esc(r.pain)}</p></div>`;drawer(true)}
+async function runInject(){MODE='tests';side();sid=null;input(false,'Judge test — read-only');$('#log').innerHTML='';header('Judge test · post-submission context injection',false);chip('Injecting new context…');
+ const r=await post('/demo/api/inject',{language:LANG});$('#log').innerHTML='';
+ r.steps.forEach(s=>{chip(esc(s.what),'sys');chip('Before');vera({body:s.before});chip('After new context');vera({body:s.after})});
+ $('#log').insertAdjacentHTML('beforeend',`<div class="verdict ok">✅ Adapted to new data — nothing invented, no merchant intel leaked to customers</div>`);const el=$('#res_inject');if(el)el.textContent='PASS';
+ $('#drawer').innerHTML=`<div class="dh"><b>🧪 Context injection</b><button onclick="drawer(false)">×</button></div><div class="sec"><h4>The twist (brief §8)</h4><p>After submission the judge pushes new digest items, shifted metrics, new triggers and customer contexts. Bots that adapt without hallucinating score higher.</p></div>`;drawer(true)}
+async function week(x){if(!x)return;MODE='week';side();sid=null;input(false,'Weekly plan — read-only');$('#log').innerHTML='';header(`Weekly plan · ${x.merchant}`,false);chip('Planning the week…');
+ const r=await post('/demo/api/portfolio',{merchant_id:x.merchant_id,language:LANG});$('#log').innerHTML='';chip('5 different conversations — not just reminders','sys');
+ r.week.forEach(w=>$('#log').insertAdjacentHTML('beforeend',`<div class="day"><h5>${w.day} · ${esc(w.kind)} <small>· ${esc(w.group)} · ${esc(w.source)}</small></h5>${esc(w.body).replace(/\n/g,'<br>')}</div>`));
+ $('#drawer').innerHTML=`<div class="dh"><b>📅 Why a portfolio</b><button onclick="drawer(false)">×</button></div><div class="sec"><p>Reminders like renewals are rare. Engaging a merchant 3–5× a week needs knowledge- and curiosity-led conversations: research, trends, events, asks. Each one here is fact-checked.</p></div>`;drawer(true)}
+
+// ---------- wiring
+document.querySelectorAll('#nav button').forEach(b=>b.onclick=()=>{MODE=b.dataset.m;document.querySelectorAll('#nav button').forEach(x=>x.classList.toggle('on',x===b));side();
+ if(MODE==='chat')empty();else{sid=null;drawer(false);header(MODE==='tests'?'Pick a judge test on the left':'Pick a merchant on the left',false);input(false,'Read-only view');
+  $('#log').innerHTML=`<div class="empty"><h2>${MODE==='tests'?'🧪 Judge tests':'📅 Weekly plan'}</h2><p>${MODE==='tests'?'Run the exact scenarios magicpin\'s judge uses: auto-replies, intent switches, hostile replies, curveballs, and new context arriving mid-test.':'See five different conversations Vera would have with one merchant this week.'}</p></div>`}});
+$('#lang').onchange=e=>{LANG=e.target.value;if(MODE==='chat'&&cur)start(cur)};
+$('#insBtn').onclick=()=>drawer(!$('#shell').classList.contains('drawer'));$('#dealsBtn').onclick=deals;
 $('#f').onsubmit=e=>{e.preventDefault();send($('#in').value)};
-(async()=>{SC=await (await fetch('/demo/api/scenarios')).json();infoDefault();side()})();
+$('#att').onclick=()=>$('#file').click();
+$('#file').onchange=e=>{const f=e.target.files[0];if(!f)return;const img=new Image(),rd=new FileReader();rd.onload=()=>{img.onload=()=>{const k=Math.min(1,1024/Math.max(img.width,img.height));const c=document.createElement('canvas');c.width=img.width*k;c.height=img.height*k;c.getContext('2d').drawImage(img,0,0,c.width,c.height);send($('#in').value,c.toDataURL('image/jpeg',.82))};img.src=rd.result};rd.readAsDataURL(f);e.target.value=''};
+(async()=>{SC=await (await fetch('/demo/api/scenarios')).json();side();empty()})();
 </script></body></html>"""

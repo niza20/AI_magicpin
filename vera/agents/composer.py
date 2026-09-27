@@ -185,10 +185,21 @@ def _short(s: Optional[str], n: int = 170) -> Optional[str]:
 
 
 # ============================================================ family realizers
+_CLOSE_EN = ["Want me to {x}? Reply YES and I'll take it from there.",
+             "Shall I {x}? Just reply YES.",
+             "Want me to {x}? Reply YES — I'll handle the rest.",
+             "Should I {x}? Reply YES and consider it done."]
+_CLOSE_HI = ["Main {x}? Bas YES reply karein, baaki main sambhal loongi.",
+             "Main {x}? YES reply kijiye, main shuru kar deti hoon.",
+             "Main {x}? Bas ek YES reply kijiye.",
+             "Main {x}? YES reply kijiye, baaki kaam mera."]
+
+
 def _post_cta(b: Brief, what_en: str, what_hi: str) -> dict:
+    import hashlib
+    i = int(hashlib.md5(f"{b.P('name')}|{b.ta.family}".encode()).hexdigest(), 16) % len(_CLOSE_EN)
     return {
-        "effort": b.t(f"Want me to {what_en}? Reply YES and I'll take it from there.",
-                      f"Main {what_hi}? Bas YES reply karein, baaki main sambhal loongi."),
+        "effort": b.t(_CLOSE_EN[i].format(x=what_en), _CLOSE_HI[i].format(x=what_hi)),
         "curiosity": b.t(f"Want me to {what_en}?", f"Kya main {what_hi}?"),
     }
 

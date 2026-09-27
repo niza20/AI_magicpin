@@ -80,6 +80,8 @@ class ConversationState:
     unclear_count: int = 0
     later_count: int = 0
     merchant_memory: dict = field(default_factory=dict)          # shared per-merchant memory (e.g. auto-reply texts)
+    attachments: list = field(default_factory=list)              # photos the merchant shared in this chat
+    pending_deal: Optional[str] = None                           # catalog deal Vera proposed to put live
 
     def bot_bodies(self) -> list[str]:
         return [m["body"] for m in self.messages if m["from"] == "vera"]
@@ -172,6 +174,20 @@ class ReplyEngine:
                 state.actions_requested.append("callback")
             return self._send(state, w, getattr(self, body_fn)(state, w, message), cta, why,
                               allow=("self_intro",) if mi == "identity" else ())
+        if mi == "explicit_action" and state.pending_deal:
+            deal, state.pending_deal = state.pending_deal, None
+            state.actions_requested.append("deal")
+            b = w["brief"]
+            name = b.P("name") or ""
+            return self._send(state, w, [b.t(f"Done ✅ “{deal}” is set up as a new magicpin deal for {name}. It goes live as soon as you reply GO — and I'll feature it in your next Google post too.",
+                                             f"Ho gaya ✅ “{deal}” {name} ke liye naye magicpin deal ke roop mein set hai. GO reply karte hi live ho jaayega — aur agle Google post mein bhi feature kar dungi.")],
+                              "binary_yes_stop", "Merchant accepted the proposed magicpin deal → set it up immediately.")
+        if mi == "explicit_action" and state.actions_requested and state.actions_requested[-1] in ("photo", "deal") and re.search(r"\bgo\b", message.lower()):
+            b = w["brief"]
+            what = "post with your photo" if state.actions_requested[-1] == "photo" else "deal"
+            return self._send(state, w, [b.t(f"Scheduled ✅ Your {what} is queued for publishing — you'll see it on your listing shortly. Anything else you want to add this week?",
+                                             f"Schedule ho gaya ✅ Aapka {'photo wala post' if what != 'deal' else 'deal'} publish queue mein hai — thodi der mein listing pe dikhega. Is hafte aur kuch add karna hai?")],
+                              "open_ended", "Merchant confirmed with GO → publish and offer the next step.")
         if mi == "explicit_action":
             state.exit_state = None
             state.merchant_sentiment = "positive"
@@ -370,6 +386,85 @@ class ReplyEngine:
         live_hi = f"Main ise {when} ke liye schedule kar dungi — confirm karne ke liye GO reply karein, ya edits bhej dijiye." if when else "GO reply karein toh aaj hi live kar doon, ya edits bhej dijiye."
         return [b.t(f"Done ✅ Here's the draft post for {name} ↓\n{post_en}\n{live_en}{extra_en}",
                     f"Ho gaya ✅ {name} ke liye draft post ↓\n{post_hi}\n{live_hi}{extra_hi}")]
+
+    # ------------------------------------------------------- photos & deals
+    def respond_photo(self, state: ConversationState, image_ref: str, caption: str = "") -> dict:
+        """Merchant shared a photo (e.g. a dish). Vera turns it into listing photos + a post draft."""
+        state.attachments.append(image_ref)
+        state.messages.append({"from": "customer" if state.customer else "merchant", "body": caption or "[photo]", "ts": time.time()})
+        w = self._working(state, caption or None)
+        b = w["brief"]
+        name, loc = b.P("name") or "", b.P("locality")
+        where = f"{name}, {loc}" if loc else name
+        cap = (caption or "").strip().rstrip(".")
+        offer, kind = b.offer()
+        food = b.prof.slug == "restaurants"
+        headline_en = cap or ("Fresh from our kitchen" if food else "A look inside")
+        headline_hi = cap or ("Fresh from our kitchen" if food else "Ek jhalak andar se")
+        line = f"{headline_en} — " + (f"{offer} at {where}." if offer and kind == "active" else f"at {where}.") + " Message us on WhatsApp to order." if food else \
+            f"{headline_en} — " + (f"{offer} at {where}." if offer and kind == "active" else f"{where}.") + " Message us on WhatsApp to book."
+        peer_photos, _ = b.tools.get_peer_stat("photos")
+        noun = b.prof.noun_singular + ("s" if not b.prof.noun_singular.endswith("y") else "").replace("ys", "ies")
+        peer_en = f" Similar {b.prof.noun_singular}s average {int(peer_photos)} photos on Google, so every good one counts." if peer_photos else ""
+        peer_hi = f" Similar {b.prof.noun_singular}s ke Google pe average {int(peer_photos)} photos hote hain, isliye har acchi photo kaam ki hai." if peer_photos else ""
+        state.actions_requested.append("photo")
+        if state.customer:
+            body = [b.t(f"Thanks for sharing! 🙏 We've got your photo — our team at {name} will get back to you here shortly.",
+                        f"Photo ke liye thanks! 🙏 {name} ki team yahin jaldi jawab degi.")]
+            return self._send(state, w, body, "none", "Customer shared a photo → acknowledge; merchant team follows up.")
+        body = [b.t(f"Got it 📸 {'That looks delicious! ' if food else ''}I'll add it to {name}'s Google photos and build a post around it.{peer_en}\n"
+                    f"Draft post ↓\n{line}\nReply GO to publish, or send a different caption.",
+                    f"Mil gayi 📸 {'Kya baat hai, bahut tasty lag raha hai! ' if food else ''}Main ise {name} ki Google photos mein add karke iske saath ek post bana deti hoon.{peer_hi}\n"
+                    f"Draft post ↓\n{line.replace(headline_en, headline_hi)}\nPublish karne ke liye GO reply karein, ya naya caption bhejiye.")]
+        return self._send(state, w, body, "binary_yes_stop",
+                          "Photo received → added to listing photos + post draft built on the merchant's real offer (peer photo benchmark cited).")
+
+    def deals(self, state: ConversationState) -> dict:
+        """Notify about magicpin deals: what's live / off for this merchant, and one catalog deal worth adding."""
+        w = self._working(state, None)
+        b = w["brief"]
+        tools = w["tools"]
+        name = b.P("name") or ""
+        live = [t for t, _ in tools.get_active_offers()]
+        off = [(t, s) for t, s, _ in tools.get_inactive_offers()]
+        have = {t.lower() for t in live} | {t.lower() for t, _ in off}
+
+        def rank(t):
+            tl = t.lower()
+            return 0 if "@ ₹" in t else 1 if "free" in tl and "%" not in tl else 3 if "%" in tl else 2
+        suggest = sorted([t for t, _ in tools.get_catalog_offers() if t.lower() not in have], key=rank)[:2]
+        if state.customer:
+            first = (w["cust"].first_name if w["cust"] else "") or ""
+            if not (w["cust"] and w["cust"].consent_ok and any("promot" in str(s) or "offer" in str(s)
+                                                            for s in (tools.get_customer_fact("consent.scope") or []))):
+                return {"action": "end", "rationale": f"Not sent: {first or 'this customer'} hasn't consented to promotional messages (deal alerts need promotional consent)."}
+            if not live:
+                return {"action": "end", "rationale": "Not sent: the merchant has no live deals to share."}
+            body = [b.t(f"Hi {first}, {b.merchant_short()} here 🏷 Deals live on magicpin this week: {'; '.join(live[:2])}. Reply YES and we'll hold one for you.",
+                        f"Hi {first}, {b.merchant_short()} se 🏷 Is hafte magicpin pe deals: {'; '.join(live[:2])}. YES reply karein, hum aapke liye hold kar lenge.",
+                        f"नमस्ते {first}, {b.merchant_short()} से 🏷 इस हफ़्ते magicpin पर deals: {'; '.join(live[:2])}। YES भेजें, हम आपके लिए रख लेंge।".replace("ge।", "गे।"))]
+            return self._send(state, w, body, "binary_yes_stop", "Deal alert to a customer with promotional consent, using only the merchant's live deals.")
+        lines_en, lines_hi = [], []
+        if live:
+            lines_en.append("• Live now: " + "; ".join(live[:3]))
+            lines_hi.append("• Abhi live: " + "; ".join(live[:3]))
+        if off:
+            lines_en.append("• Not running: " + "; ".join(f"{t} ({s})" for t, s in off[:2]))
+            lines_hi.append("• Band hai: " + "; ".join(f"{t} ({s})" for t, s in off[:2]))
+        if suggest:
+            lines_en.append("• Popular in your category, not on your listing yet: " + "; ".join(suggest))
+            lines_hi.append("• Aapki category mein popular, par aapki listing pe nahi: " + "; ".join(suggest))
+            state.pending_deal = suggest[0]
+            ask_en = f"Want me to put “{suggest[0]}” live for {name} this week? Reply YES."
+            ask_hi = f"Main {name} ke liye is hafte “{suggest[0]}” live kar doon? Reply YES."
+        elif off:
+            ask_en, ask_hi = f"Want me to switch “{off[0][0]}” back on? Reply YES.", f"“{off[0][0]}” wapas on kar doon? Reply YES."
+            state.pending_deal = off[0][0]
+        else:
+            ask_en, ask_hi = "Want me to feature your live deal in this week's Google post? Reply YES.", "Is hafte ke Google post mein aapka live deal feature kar doon? Reply YES."
+        body = [b.t(f"Quick magicpin deals check for {name} 🏷\n" + "\n".join(lines_en) + "\nService + price deals get picked up best by people browsing magicpin. " + ask_en,
+                    f"{name} ke magicpin deals ka quick check 🏷\n" + "\n".join(lines_hi) + "\nmagicpin pe service + price wale deals sabse zyada chalte hain. " + ask_hi)]
+        return self._send(state, w, body, "binary_yes_stop", "magicpin deals notification: live / not running / one catalog deal to add (service+price first).")
 
     # ---------------------------------------------------------- curveballs
     def _cb_identity(self, state, w, message):
