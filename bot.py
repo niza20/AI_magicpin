@@ -237,7 +237,7 @@ if FastAPI is not None:
     @app.get("/v1/metadata")
     def metadata():
         llm = get_llm()
-        return {"team_name": "Vera Agentic", "team_members": ["Nishant"],
+        return {"team_name": "Vera Agentic", "team_members": ["Niza Garg"],
                 "model": llm.model if llm.enabled else "deterministic-agents (LLM optional)",
                 "approach": "15-agent orchestrated pipeline: fact-ledger context analyst, trigger analyst, intent router, "
                             "strategy planner, category expert, personalization, customer, language, composer (multi-candidate), "
