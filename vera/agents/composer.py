@@ -589,13 +589,28 @@ def r_festival(b: Brief) -> Parts:
     return Parts(hook, anchor, levers, ctas)
 
 
-_WEATHER_IDEA = {
-    "operator": ("push delivery and evening slots", "delivery aur evening slots push karne"),
-    "warm": ("promote evening appointments and cool-down services", "evening appointments aur cool-down services promote karne"),
-    "coach": ("nudge members to early-morning or indoor sessions", "members ko early-morning ya indoor sessions ki taraf nudge karne"),
-    "trust": ("share a short heat-safety note with your customers", "customers ke saath ek chhota heat-safety note share karne"),
-    "clinical": ("share a short hydration and oral-care tip with patients", "patients ke saath hydration aur oral-care tip share karne"),
+_WEATHER_IDEA = {  # (slug, weather kind) → (en, hi-en); weather kind is "rain", "heat", "cold" or "any"
+    ("restaurants", "rain"): ("push delivery and a rainy-day comfort-food combo", "delivery aur rainy-day comfort-food combo push karne"),
+    ("restaurants", "any"): ("push delivery and evening slots", "delivery aur evening slots push karne"),
+    ("salons", "rain"): ("offer easy rescheduling and indoor pampering slots", "easy rescheduling aur indoor pampering slots offer karne"),
+    ("salons", "heat"): ("promote evening appointments and cool-down services", "evening appointments aur cool-down services promote karne"),
+    ("salons", "any"): ("promote evening appointments", "evening appointments promote karne"),
+    ("gyms", "any"): ("nudge members to early-morning or indoor sessions", "members ko early-morning ya indoor sessions ki taraf nudge karne"),
+    ("pharmacies", "rain"): ("remind customers about home delivery and monsoon essentials", "customers ko home delivery aur monsoon essentials yaad dilane"),
+    ("pharmacies", "any"): ("share a short safety note with your customers", "customers ke saath ek chhota safety note share karne"),
+    ("dentists", "any"): ("share a short oral-care tip with patients and offer easy rescheduling", "patients ke saath oral-care tip share karne aur easy rescheduling offer karne"),
 }
+
+
+def _weather_kind(text: str) -> str:
+    t = (text or "").lower()
+    if any(w in t for w in ("rain", "monsoon", "flood", "storm", "shower", "cyclone")):
+        return "rain"
+    if any(w in t for w in ("heat", "hot", "°c", "temperature", "summer")):
+        return "heat"
+    if any(w in t for w in ("cold", "fog", "winter", "chill")):
+        return "cold"
+    return "any"
 
 
 def r_weather(b: Brief) -> Parts:
@@ -604,7 +619,9 @@ def r_weather(b: Brief) -> Parts:
     hook = b.t(f"{b.sal()}, {what}" + (f" in {city}" if city else "") + (f" ({date})." if date else " today."),
                f"{b.sal()}, " + (f"{city} mein " if city else "") + f"{what}" + (f" ({date})." if date else " aaj."))
     anchor = [b.t(f"Seasonal note: {b.A('beat')}.", f"Seasonal note: {b.A('beat')}.")] if b.A("beat") else []
-    idea_en, idea_hi = _WEATHER_IDEA.get(b.prof.register, ("post a timely update for your customers", "customers ke liye timely update post karne"))
+    wk = _weather_kind(" ".join(str(x) for x in (b.Araw("condition"), b.Araw("temp"), b.ta.trigger_type) if x))
+    idea_en, idea_hi = _WEATHER_IDEA.get((b.prof.slug, wk)) or _WEATHER_IDEA.get((b.prof.slug, "any")) or \
+        ("post a timely update for your customers", "customers ke liye timely update post karne")
     levers = {"specificity": b.t(f"A good week to {idea_en}.", f"Yeh {idea_hi} ka sahi hafta hai.")}
     if b.P("calls") and b.P("window"):
         levers["reciprocity"] = b.t(f"You got {b.P('calls')} calls in the last {b.P('window')} — a timely post keeps you the first call this week.",

@@ -153,3 +153,19 @@ def test_demo_category_photos_and_local_override(tmp_path):
         assert c.get("/demo/assets/..%2Fbot.py").status_code == 404
     finally:
         demo_ui._ASSETS = old
+
+
+def test_brand_new_merchant_and_trigger_outside_the_dataset(client):
+    """A judge can push any new merchant/trigger through /v1/context and get a grounded message."""
+    m = {"merchant_id": "m_900_biryani_house", "category_slug": "restaurants",
+         "identity": {"name": "Hyderabadi Biryani House", "owner_first_name": "Imran", "city": "Hyderabad", "languages": ["en"]},
+         "performance": {"window_days": 30, "views": 3100, "calls": 19, "ctr": 0.021},
+         "offers": [{"title": "Family Biryani Bucket @ ₹699", "status": "active"}]}
+    t = {"id": "trg_900_rain", "kind": "weather_alert", "scope": "merchant", "merchant_id": m["merchant_id"], "urgency": 4,
+         "payload": {"condition": "heavy rain", "city": "Hyderabad", "date": "2026-09-28"}}
+    assert client.post("/v1/context", json={"scope": "merchant", "context_id": m["merchant_id"], "version": 1, "payload": m}).json()["accepted"]
+    assert client.post("/v1/context", json={"scope": "trigger", "context_id": t["id"], "version": 1, "payload": t}).json()["accepted"]
+    acts = client.post("/v1/tick", json={"now": "2026-09-27T10:00:00Z", "available_triggers": [t["id"]]}).json()["actions"]
+    assert len(acts) == 1
+    b = acts[0]["body"]
+    assert "Imran" in b and "rain" in b.lower() and "delivery" in b.lower() and "appointments" not in b
