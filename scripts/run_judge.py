@@ -1,7 +1,7 @@
 """Run magicpin's judge_simulator.py against a bot, reading the official dataset from dataset/expanded.
 
 Real LLM scoring (key stays in your shell, never in a file):
-    export JUDGE_PROVIDER=gemini          # gemini | groq | openai | anthropic | openrouter | ollama
+    export JUDGE_PROVIDER=gemini          # gemini | groq | xai (Grok) | openai | anthropic | openrouter | ollama
     export JUDGE_API_KEY=your-key         # not needed for ollama
     export JUDGE_MODEL=                   # optional, e.g. gemini-2.0-flash
     python scripts/run_judge.py https://your-bot.onrender.com phase2_short
@@ -38,11 +38,32 @@ class StubLLM(js.LLMProvider):
         return '{"specificity":5,"category_fit":5,"merchant_fit":5,"decision_quality":5,"engagement_compulsion":5,"hint":"stub"}'
 
 
+class XAIProvider(js.LLMProvider):
+    """xAI Grok (OpenAI-compatible chat completions API) — not built into judge_simulator.py."""
+
+    def __init__(self, api_key: str, model: str = ""):
+        self.api_key, self.model = api_key, model or "grok-3-mini"
+
+    def name(self):
+        return f"xAI Grok ({self.model})"
+
+    def complete(self, prompt, system=None):
+        import json
+        from urllib import request as rq
+        msgs = ([{"role": "system", "content": system}] if system else []) + [{"role": "user", "content": prompt}]
+        req = rq.Request("https://api.x.ai/v1/chat/completions",
+                         data=json.dumps({"model": self.model, "messages": msgs, "temperature": 0.2, "max_tokens": 1500}).encode(),
+                         headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"})
+        return json.loads(rq.urlopen(req, timeout=js.TIMEOUT_LLM).read())["choices"][0]["message"]["content"]
+
+
 provider = os.environ.get("JUDGE_PROVIDER", "").lower()
+if provider == "grok":
+    provider = "xai"
 key = os.environ.get("JUDGE_API_KEY", "")
 if provider and (key or provider == "ollama"):
     js.LLM_PROVIDER, js.LLM_API_KEY, js.LLM_MODEL = provider, key, os.environ.get("JUDGE_MODEL", "")
-    llm = js.create_provider()
+    llm = XAIProvider(key, js.LLM_MODEL) if provider == "xai" else js.create_provider()
     try:
         llm.complete("Say ready.", "You are a test assistant.")
     except Exception as e:  # show a clear message instead of a stack trace
