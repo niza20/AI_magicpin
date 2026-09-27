@@ -197,6 +197,24 @@ def handle_reply(body: dict) -> dict:
 if FastAPI is not None:
     app = FastAPI(title="Vera agentic bot")
 
+    import re as _re
+    _ALIAS = _re.compile(r"^(?:/demo)?(?:/api)?(?:/v1)?/(healthz|health|metadata|context|tick|reply|teardown)/?$")
+    _NAMES = {"health": "healthz"}
+
+    @app.middleware("http")
+    async def _judge_aliases(request, call_next):
+        """Whatever base URL the judge was given (…/, …/demo, with or without /v1, trailing slash), the
+        judge endpoints resolve to the same /v1 handlers. /demo/api/* (the chat UI) is left alone."""
+        path = request.scope["path"]
+        if not path.startswith("/demo/api/"):
+            m = _ALIAS.match(path)
+            if m:
+                target = "/v1/" + _NAMES.get(m.group(1), m.group(1))
+                request.scope["path"], request.scope["raw_path"] = target, target.encode()
+            elif path.rstrip("/") in ("/v1", "/demo/v1"):
+                request.scope["path"], request.scope["raw_path"] = "/", b"/"
+        return await call_next(request)
+
     class CtxBody(BaseModel):
         scope: str
         context_id: str
@@ -273,6 +291,21 @@ if FastAPI is not None:
     @app.post("/v1/reply")
     def reply(body: ReplyBody):
         return handle_reply(body.model_dump())
+
+    _USAGE = {
+        "context": {"method": "POST", "body": {"scope": "category|merchant|customer|trigger", "context_id": "…", "version": 1, "payload": {}}},
+        "tick": {"method": "POST", "body": {"now": "2026-04-26T10:30:00Z", "available_triggers": ["trg_…"]}},
+        "reply": {"method": "POST", "body": {"conversation_id": "…", "merchant_id": "…", "from_role": "merchant|customer", "message": "…", "turn_number": 2}},
+        "teardown": {"method": "POST", "body": {}},
+    }
+
+    @app.get("/v1/{name}")
+    def post_only_help(name: str):
+        """A browser visit (GET) to a POST endpoint gets usage help instead of a bare 405."""
+        if name not in _USAGE:
+            return JSONResponse(status_code=404, content={"detail": "Not Found", "endpoints": root()["endpoints"]})
+        return {"endpoint": f"/v1/{name}", "status": "live", "note": "This endpoint takes a POST with a JSON body (the judge sends it); "
+                "opening it in a browser sends a GET, so here is the expected request instead.", **_USAGE[name]}
 
     @app.post("/v1/teardown")
     def teardown():

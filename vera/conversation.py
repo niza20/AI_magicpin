@@ -511,6 +511,8 @@ class ReplyEngine:
         chosen = None
         for body in options:
             body = re.sub(r"[ \t]+", " ", body).strip()
+            if w["brief"].sal() == "Hi":                 # no known name: "Just to check, Hi —" → "Just to check —"
+                body = re.sub(r",\s*Hi(?=\s*[—.,!?-])", "", body)
             if body in prev:
                 continue
             d = Draft(segments=[("reply", body)], cta=cta, plan=StrategyPlan("reply", "", "", [], [], cta, "", []),

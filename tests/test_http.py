@@ -265,3 +265,21 @@ def test_features_tab_stats_are_live():
     assert st["test_pairs"] == 30 and st["triggers"] == 100 and st["fallbacks"] == 0 and st["categories"] == 5
     page = c.get("/demo").text
     assert 'data-m="features"' in page and "const TOUR=[" in page and "Start the guided tour" in page
+
+
+@pytest.mark.parametrize("base", ["", "/demo", "/demo/"])
+def test_judge_endpoints_work_from_either_base_url(client, base):
+    """Submitting …/demo instead of the root must not break the judge: /demo/v1/* resolves to /v1/*."""
+    b = base.rstrip("/")
+    assert client.get(f"{b}/v1/healthz").json()["status"] == "ok"
+    assert client.get(f"{b}/v1/metadata").json()["team_members"] == ["Niza Garg"]
+    assert client.post(f"{b}/v1/context", json={"scope": "category", "context_id": "alias_t", "version": 1, "payload": {"slug": "x"}}).json()["accepted"]
+    assert "actions" in client.post(f"{b}/v1/tick", json={"now": "2026-04-26T10:30:00Z", "available_triggers": []}).json()
+    assert client.post(f"{b}/v1/teardown").json() == {"ok": True}
+
+
+def test_browser_get_on_post_endpoints_explains_usage(client):
+    for name in ("context", "tick", "reply", "teardown"):
+        r = client.get(f"/v1/{name}")
+        assert r.status_code == 200 and r.json()["method"] == "POST"
+    assert client.get("/v1/nope").status_code == 404
