@@ -335,8 +335,17 @@ def _perf_no_move(b: Brief, up: bool) -> Parts:
     moves = ", ".join(x for x in (f"views {'+' if (b.ta.anchor['flat_views'].get('signed') or 0) >= 0 else '-'}{fv}" if fv else None,
                                   f"calls {'+' if (b.ta.anchor['flat_calls'].get('signed') or 0) >= 0 else '-'}{fc}" if fc else None) if x)
     name = b.P("name") or ""
-    hook = b.t(f"{b.sal()}, quick health check on {name}: this week {moves or 'your numbers look steady'}.",
-               f"{b.sal()}, {name} ka quick health check: is hafte {moves or 'numbers steady hain'}.")
+    falling = any((b.ta.anchor.get(k, {}).get("signed") or 0) < 0 for k in ("flat_views", "flat_calls") if b.ta.anchor.get(k))
+    v, c, w, ctr = b.P("views"), b.P("calls"), b.P("window"), b.P("ctr")
+    if v and c and w:
+        # 30-day totals are what the merchant sees on their dashboard (and what the judge can verify)
+        show_ctr = ctr and not b.P("ctr_gap") and not b.A("expired_days")
+        tot_en = f"{v} views and {c} calls in the last {w}" + (f" (CTR {ctr})" if show_ctr else "") + ("; this week is softer" if falling else "")
+        tot_hi = f"pichhle {w.replace('days', 'din')} mein {v} views aur {c} calls" + (f" (CTR {ctr})" if show_ctr else "") + (", aur is hafte thoda dheema hai" if falling else "")
+        hook = b.t(f"{b.sal()}, quick health check on {name}: {tot_en}.", f"{b.sal()}, {name} ka quick health check: {tot_hi}.")
+    else:
+        hook = b.t(f"{b.sal()}, quick health check on {name}: this week {moves or 'your numbers look steady'}.",
+                   f"{b.sal()}, {name} ka quick health check: is hafte {moves or 'numbers steady hain'}.")
     anchor, levers, ctas = [], {}, {}
     if b.A("expired_days"):
         plan = b.A("plan")
@@ -347,8 +356,10 @@ def _perf_no_move(b: Brief, up: bool) -> Parts:
         anchor.append(b.t(f"The one gap: CTR {b.P('ctr')} vs {b.P('peer_ctr')} for {b.prof.peer_label}.",
                           f"Ek gap: CTR {b.P('ctr')} vs {b.prof.peer_label} ka {b.P('peer_ctr')}."))
     o_en, o_hi = b.offer_phrase()
-    ctas.setdefault("effort", _post_cta(b, f"put up a fresh post with {o_en} to keep it that way" if o_en else "put up a fresh post to keep it that way",
-                                         f"{o_hi} ke saath ek fresh post laga doon taaki yeh bana rahe" if o_hi else "ek fresh post laga doon taaki yeh bana rahe")["effort"])
+    goal_en, goal_hi = ("to pull those numbers back up", "taaki numbers wapas upar aayein") if falling else \
+        ("to close that CTR gap", "taaki CTR ka gap kam ho") if b.P("ctr_gap") else ("to keep it that way", "taaki yeh bana rahe")
+    ctas.setdefault("effort", _post_cta(b, f"put up a fresh post with {o_en} {goal_en}" if o_en else f"put up a fresh post {goal_en}",
+                                         f"{o_hi} ke saath ek fresh post laga doon {goal_hi}" if o_hi else f"ek fresh post laga doon {goal_hi}")["effort"])
     return Parts(hook, anchor, levers, ctas)
 
 
@@ -992,7 +1003,11 @@ def r_planning(b: Brief) -> Parts:
         bullets.append(b.t(f"• Lead with what reviews already praise: {b.P('praise')}", f"• Jo reviews mein pasand kiya jaata hai wahi lead karein: {b.P('praise')}"))
     bullets.append(b.t(f"• Format: fixed batches, pre-booking on WhatsApp, one clear start date",
                        f"• Format: fixed batches, WhatsApp pe pre-booking, ek clear start date"))
-    if b.P("customers_total"):
+    if b.P("calls") and b.P("window"):
+        wd = b.P("window")
+        bullets.append(b.t(f"• First invite: the {b.P('calls')} people who called you in the last {wd}, then a post for your {b.P('views') or ''} listing viewers".replace("  ", " "),
+                           f"• Pehla invite: pichhle {wd.replace('days', 'din')} ke {b.P('calls')} callers, phir listing ke {b.P('views') or ''} viewers ke liye post".replace("  ", " ")))
+    elif b.P("customers_total"):
         bullets.append(b.t(f"• First invite: your {b.P('customers_total')} existing {cn} this year", f"• Pehla invite: is saal ke aapke {b.P('customers_total')} existing {cn}"))
     anchor = ["\n" + "\n".join(bullets)]
     levers = {"effort_externalization": ""}

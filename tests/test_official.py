@@ -86,3 +86,15 @@ def test_research_digest_ties_to_visible_listing_numbers_not_hidden_aggregates()
     b = compose(*_ctx("trg_029_research_digest_m_050_bharti_pharmac"))["body"]
     assert "895 views" in b and "6 calls" in b
     assert "1,535" not in b and "88%" not in b, "customer_aggregate / second-paragraph stats aren't visible to the judge"
+
+
+def test_health_check_uses_30_day_totals_and_matches_direction():
+    b = compose(*_ctx("trg_031_perf_dip_m_023_sushma_salon_p"))["body"]
+    assert "2,547 views" in b and "+8%" not in b
+    b = compose(*_ctx("trg_039_perf_spike_m_017_dr_rajan_denti"))["body"]
+    assert "bana rahe" not in b, "numbers are falling — don't offer to 'keep it that way'"
+
+
+def test_planning_first_invite_uses_visible_numbers():
+    b = compose(*_ctx("trg_013_corporate_thali_planning"))["body"]
+    assert "88 callers" in b and "4,200" not in b
