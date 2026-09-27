@@ -139,7 +139,8 @@ def test_demo_category_photos_and_local_override(tmp_path):
     c = TestClient(bot.app)
     sc = {x["merchant"]: x for x in c.get("/demo/api/scenarios").json()}
     s = c.post("/demo/api/start", json={"trigger_id": sc["Mylari South Indian Cafe"]["trigger_id"]}).json()
-    assert s["media"]["label"] == "South Indian thali" and s["media"]["url"] == "/demo/assets/south_indian.svg"
+    assert s["media"]["label"] == "South Indian thali" and "South_Indian_meal_served_on_a_banana_leaf" in s["media"]["url"]
+    assert s["media"]["srcs"][-1] == "/demo/assets/south_indian.svg" and s["media"]["credits"][0].startswith("https://commons.wikimedia.org/wiki/File:")
     assert c.get("/demo/assets/south_indian.svg").headers["content-type"].startswith("image/svg+xml")
     assert sc["Dr. Meera's Dental Clinic"]["thumb"], "every category gets a photo now"
     # a local file in demo_assets/photos/<key>.jpg wins over the online sample and is served safely
@@ -148,7 +149,7 @@ def test_demo_category_photos_and_local_override(tmp_path):
     try:
         (tmp_path / "pizza.jpg").write_bytes(b"\xff\xd8\xff fake jpg")
         s = c.post("/demo/api/start", json={"trigger_id": sc["SK Pizza Junction"]["trigger_id"]}).json()
-        assert s["media"]["srcs"] == ["/demo/assets/pizza.jpg"]
+        assert s["media"]["srcs"][0] == "/demo/assets/pizza.jpg" and s["media"]["credits"][0] == ""
         assert c.get("/demo/assets/pizza.jpg").status_code == 200
         assert c.get("/demo/assets/..%2Fbot.py").status_code == 404
     finally:

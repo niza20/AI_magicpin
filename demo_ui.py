@@ -46,10 +46,10 @@ LANGS = {"auto": None, "en": "en", "hi-en": "hi-en", "hi": "hi"}
 QUALIFYING = ["would you", "do you", "can you tell", "what if", "how about"]
 
 
-# Category photos. Order of sources per photo: your own file in demo_assets/photos/<key>.jpg (always right) →
-# a Flickr photo tagged with the subject (loremflickr) → a styled card with the label (if the image can't load).
+# Category photos. Order of sources per photo: your own file in demo_assets/photos/<key>.jpg → real Wikimedia Commons
+# photos (see COMMONS) → our SVG illustration → a styled card with the label (if nothing can load).
 _ASSETS = _ROOT / "demo_assets" / "photos"
-PHOTOS = {  # key: (label, flickr tags)
+PHOTOS = {  # key: (label, search tags)
     "south_indian": ("South Indian thali", "thali"), "dosa": ("Masala dosa", "dosa"), "pizza": ("Pizza", "pizza"),
     "chai": ("Masala chai", "chai"), "kebab": ("Kebab platter", "kebab"), "tandoori": ("Tandoori platter", "tandoori"),
     "biryani": ("Biryani", "biryani"), "burger": ("Burger", "burger"), "restaurant": ("Chef's special", "indianfood"),
@@ -70,15 +70,43 @@ _NO_PHOTO_FAMILIES = {"account", "regulation", "supply"}
 _IMG_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".svg": "image/svg+xml"}
 
 
-def _photo_srcs(key: str, w: int) -> list[str]:
-    label, tags = PHOTOS[key]
+# Real, freely licensed photos on Wikimedia Commons (file names verified to exist and to show the subject).
+# The viewer's browser loads them via Special:FilePath; 2-3 candidates per subject in case one is slow or removed.
+COMMONS = {
+    "south_indian": ["A_Thali,_famous_South_Indian_meal_served_on_a_banana_leaf.jpg", "Meal_BananaLeaf.JPG", "Food_served_on_Banana_Leaf.jpg"],
+    "dosa": ["Masala_dosa_01.jpg", "Masala_Dosa_02.jpg", "Paper_Masala_Dosa.jpg"],
+    "pizza": ["Pizza_Margherita_stu_spivack.jpg", "Eq_it-na_pizza-margherita_sep2005_sml.jpg", "Margherita_Pizza.jpg"],
+    "chai": ["Tandoori_Chai_Cup.jpg", "Masala_Chai.JPG", "A_cup_of_chai.JPG"],
+    "kebab": ["Seekh_Kebab.JPG", "Indian_Chicken_Seekh_Kebab.jpg", "Mutton_Seekh_Kabab.JPG"],
+    "tandoori": ["Tandoori_chicken_Indian.jpg", "Chicken_Tandoori_01.jpg", "TandooriChicken.jpg"],
+    "biryani": ["Hyderabadi_Chicken_Biryani.jpg", "Hyderabadi_Biryani.jpg", "Chicken_Hyderabadi_Biryani.JPG"],
+    "burger": ["A_homemade_hamburger.jpg", "Hamburger_sandwich.jpg"],
+    "restaurant": ["Shahi_Paneer_&_Butter_Naan.jpg", "Chur-Chur_Naan_Thali.jpg", "Indian-Food-wikicont.jpg"],
+    "dental": ["Dental_Chair.jpg", "Dental_office.jpg", "Dentist.JPG"],
+    "haircut": ["Hair_salon_(51212326557).jpg", "Hair_salon_photoshoot_(50845412511).jpg"],
+    "spa": ["Foot_massage_at_a_spa.jpg", "Spa_Picture_2.jpg"],
+    "salon": ["Salon_interior.jpg", "Hair_Salon_Stations.jpg"],
+    "yoga": ["Yoga_class_in_Parivritta_Anjaneyasana.jpg", "Open_space_yoga_class.jpg", "Yoga.JPG"],
+    "gym": ["Gym_Dumbbells_For_Working_Out_(193383405).jpeg", "Close-up_Hand_holding_dumbbell_in_gym.jpg", "Schumann_Fitness_Center_(1).jpg"],
+    "pharmacy": ["Hospital_Pharmacy.JPG", "Highland_Park_Pharmacy_interior_01.jpg", "Pharmacist.jpg"],
+}
+_COMMONS_FILE = "https://commons.wikimedia.org/wiki/Special:FilePath/{}?width={}"
+_COMMONS_PAGE = "https://commons.wikimedia.org/wiki/File:{}"
+
+
+def _photo_srcs(key: str, w: int) -> tuple[list[str], list[str]]:
+    """(image urls, credit urls) in priority order: your own photo → Wikimedia Commons photos → our illustration."""
+    from urllib.parse import quote
     files = sorted(_ASSETS.glob(f"{key}.*"), key=lambda f: (f.suffix.lower() == ".svg", f.name)) if _ASSETS.exists() else []
-    srcs = [f"/demo/assets/{f.name}" for f in files if f.suffix.lower() in _IMG_TYPES]   # real photos first, then our SVG art
-    if srcs:
-        return srcs
-    h = w * 5 // 9 if w > 200 else w
-    lock = sum(map(ord, key)) % 50 + 1        # stable photo per subject
-    return [f"https://loremflickr.com/{w}/{h}/{tags}?lock={lock}"]
+    own = [f for f in files if f.suffix.lower() in _IMG_TYPES and f.suffix.lower() != ".svg"]
+    art = [f for f in files if f.suffix.lower() == ".svg"]
+    srcs, credits = [f"/demo/assets/{f.name}" for f in own], ["" for _ in own]
+    for name in COMMONS.get(key, []):
+        srcs.append(_COMMONS_FILE.format(quote(name), w))
+        credits.append(_COMMONS_PAGE.format(quote(name)))
+    srcs += [f"/demo/assets/{f.name}" for f in art]
+    credits += ["illustration" for _ in art]
+    return srcs, credits
 
 
 def _dish(m: dict, text: str = "") -> Optional[dict]:
@@ -89,10 +117,10 @@ def _dish(m: dict, text: str = "") -> Optional[dict]:
     offers = " ".join(str(o.get("title", "")) for o in m.get("offers", []) if isinstance(o, dict))
     hay = f"{m.get('identity', {}).get('name', '')} {offers} {text}".lower()
     key = next(k for keys, k in rules if not keys or any(w in hay for w in keys))
-    srcs = _photo_srcs(key, 720)
-    return {"url": srcs[0], "srcs": srcs, "thumb": _photo_srcs(key, 96)[0], "thumbs": _photo_srcs(key, 96),
-            "label": PHOTOS[key][0], "key": key,
-            "caption": "Illustration — Vera uses your own photos when you share them"}
+    srcs, credits = _photo_srcs(key, 720)
+    thumbs, _ = _photo_srcs(key, 120)
+    return {"url": srcs[0], "srcs": srcs, "credits": credits, "thumb": thumbs[0], "thumbs": thumbs,
+            "label": PHOTOS[key][0], "key": key, "caption": "Sample photo — Vera uses your own photos when you share them"}
 
 
 @router.get("/demo/assets/{name}")
@@ -263,7 +291,7 @@ def _with_ui(st: ConversationState, r: dict) -> dict:
             r["draft_image"] = st.attachments[-1]
         elif _dish(st.merchant):
             d = _dish(st.merchant, body)
-            r["draft_image"], r["draft_srcs"] = d["url"], d["srcs"]
+            r["draft_image"], r["draft_srcs"], r["draft_credits"] = d["url"], d["srcs"], d["credits"]
     return r
 
 
@@ -693,7 +721,7 @@ select{background:var(--panel);color:var(--ink);border:1px solid var(--line);bor
 .v{background:var(--them)}.u{background:var(--me);margin-left:auto}
 .tm{display:block;text-align:right;color:var(--muted);font-size:11px;padding:0 9px 5px}
 .bt{border-top:1px solid var(--line);display:flex}.bt button{flex:1;border:0;background:transparent;color:var(--btn);padding:9px;cursor:pointer;font-weight:600;font-size:14px}.bt button+button{border-left:1px solid var(--line)}.bt button:disabled{color:var(--muted);cursor:default}
-.ph{margin:4px 4px 0;border-radius:6px;overflow:hidden;position:relative;max-width:380px}.ph img{display:block;width:100%;height:190px;object-fit:cover}.ph figcaption{font-size:11px;color:var(--muted);padding:4px 6px 0}.ph .lab{position:absolute;left:8px;top:8px;background:rgba(0,0,0,.55);color:#fff;font-size:12px;padding:2px 8px;border-radius:10px}.ph .fb{height:190px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:18px;background:linear-gradient(135deg,#e2725b,#f2b544)}.ra{position:relative;overflow:hidden}.ra img.av{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.ph{margin:4px 4px 0;border-radius:6px;overflow:hidden;position:relative;max-width:380px}.ph img{display:block;width:100%;height:190px;object-fit:cover}.ph figcaption{font-size:11px;color:var(--muted);padding:4px 6px 0}.ph figcaption a{color:inherit}.ph .lab{position:absolute;left:8px;top:8px;background:rgba(0,0,0,.55);color:#fff;font-size:12px;padding:2px 8px;border-radius:10px}.ph .fb{height:190px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:18px;background:linear-gradient(135deg,#e2725b,#f2b544)}.ra{position:relative;overflow:hidden}.ra img.av{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
 .form{padding:10px 14px 18px;display:grid;gap:9px}.form h5{margin:6px 0 0;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--accent)}
 .form label{font-size:12px;color:var(--muted);display:grid;gap:3px}.form label.ck{display:flex;align-items:center;gap:8px;color:var(--ink);font-size:13px}
 .form input:not([type=checkbox]),.form select{border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:8px;padding:7px 9px;font-size:14px;width:100%;box-sizing:border-box}
@@ -763,16 +791,18 @@ function hl(text,spans){const t=String(text),taken=new Array(t.length).fill(fals
   if(ok){for(let k=i;k<i+s.text.length;k++)taken[k]=true;m.push([i,i+s.text.length,s]);break}i=t.indexOf(s.text,i+1)}});
  m.sort((a,b)=>a[0]-b[0]);let o='',p=0;m.forEach(([a,b,s])=>{o+=esc(t.slice(p,a))+`<mark class="${s.layer}" title="${esc(s.source)}">${esc(t.slice(a,b))}</mark>`;p=b});return o+esc(t.slice(p))}
 
+function credit(el){const c=JSON.parse(el.dataset.credits||'[]')[+(el.dataset.i||0)],cap=el.closest('figure')?.querySelector('.cr');if(!cap)return;
+ cap.innerHTML=c==='illustration'?'Illustration':c?`Photo: <a href="${esc(c)}" target="_blank" rel="noopener">Wikimedia Commons</a> (CC licence)`:'Your photo'}
 function imgFail(el,label){const alt=JSON.parse(el.dataset.srcs||'[]');const i=+(el.dataset.i||0)+1;
- if(i<alt.length){el.dataset.i=i;el.src=alt[i];return}
+ if(i<alt.length){el.dataset.i=i;el.src=alt[i];credit(el);return}
  if(!label){el.remove();return}
  const f=document.createElement('div');f.className='fb';f.textContent=label;const l=el.parentNode&&el.parentNode.querySelector('.lab');if(l)l.remove();el.replaceWith(f)}
 const srcAttr=(srcs,url)=>`src="${esc((srcs&&srcs[0])||url)}" data-srcs="${esc(JSON.stringify(srcs||[url]))}"`;
-function fig(m){return m&&m.url?`<figure class="ph"><img ${srcAttr(m.srcs,m.url)} alt="${esc(m.label)}" loading="lazy" onerror="imgFail(this,'${esc(m.label).replace(/'/g,'')}')"><span class="lab">${esc(m.label)}</span><figcaption>${esc(m.caption||'')}</figcaption></figure>`:''}
+function fig(m){return m&&m.url?`<figure class="ph"><img ${srcAttr(m.srcs,m.url)} data-credits="${esc(JSON.stringify(m.credits||[]))}" alt="${esc(m.label)}" loading="lazy" onload="credit(this)" onerror="imgFail(this,'${esc(m.label).replace(/'/g,'')}')"><span class="lab">${esc(m.label)}</span><figcaption>${esc(m.caption||'')} · <span class="cr"></span></figcaption></figure>`:''}
 function vera(r,{spans=null,first=false}={}){const body=r.body||'';const [pre,draft]=body.split(/Draft post ↓\n|draft post ↓\n/);
  let main=pre,rest='';if(draft!==undefined){const i=draft.lastIndexOf('\n');rest=i>=0?draft.slice(i+1):'';main=pre}
  let h=(draft===undefined?fig(r.media):'')+`<div class="t">${spans?hl(main,spans):esc(main)}</div>`;
- if(draft!==undefined){const txt=draft.split('\n').slice(0,-1).join('\n')||draft;h+=`<div class="post">${r.draft_image?`<img ${srcAttr(r.draft_srcs,r.draft_image)} alt="photo" onerror="imgFail(this,'')">`:''}<div class="pl">📍 Google post preview</div><div class="pt">${esc(txt)}</div></div>`+(rest?`<div class="t">${esc(rest)}</div>`:'')}
+ if(draft!==undefined){const txt=draft.split('\n').slice(0,-1).join('\n')||draft;h+=`<div class="post">${r.draft_image?`<figure style="margin:0"><img ${srcAttr(r.draft_srcs,r.draft_image)} data-credits="${esc(JSON.stringify(r.draft_credits||[]))}" alt="photo" onload="credit(this)" onerror="imgFail(this,'')"><figcaption class="pl cr" style="text-transform:none;letter-spacing:0"></figcaption></figure>`:''}<div class="pl">📍 Google post preview</div><div class="pt">${esc(txt)}</div></div>`+(rest?`<div class="t">${esc(rest)}</div>`:'')}
  h+=`<span class="tm">${now()}</span>`;if(first)h+=`<button class="why" onclick="drawer(true);return false">ⓘ How Vera wrote this</button>`;
  if(r.buttons&&r.buttons.length)h+=`<div class="bt">${r.buttons.map(b=>`<button type="button">${esc(b)}</button>`).join('')}</div>`;
  const d=document.createElement('div');d.className='b v';d.innerHTML=h;$('#log').appendChild(d);
