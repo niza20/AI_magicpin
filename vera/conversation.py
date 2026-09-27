@@ -66,6 +66,23 @@ def cust_time(message: str) -> Optional[str]:
     return (f"{out}, {clock}" if out and clock else out or clock) or None
 
 
+def loc_time(t: Optional[str], lang: str) -> str:
+    """'Tomorrow evening, 6pm' → 'kal shaam, 6pm' for Hinglish/Hindi conversations (Hindi script comes from translit)."""
+    if not t or lang not in ("hi-en", "hi"):
+        return t or ""
+    out = t
+    for en, hi in (("Day after tomorrow", "parso"), ("day after tomorrow", "parso"), ("Tomorrow", "kal"), ("tomorrow", "kal"),
+                   ("Today", "aaj"), ("today", "aaj"), ("This weekend", "is weekend"), ("this weekend", "is weekend"),
+                   ("morning", "subah"), ("afternoon", "dopahar"), ("evening", "shaam"), ("night", "raat")):
+        out = re.sub(rf"\b{en}\b", hi, out)
+    return out
+
+
+_ITEM_REQ = re.compile(r"\b(?:bring|add|send|include|deliver|also need|need|want|chahiye|laana|lana|bhej(?:na|do)?)\s+(?:me\s+|us\s+|some\s+|a\s+|an\s+|the\s+|ek\s+)?"
+                       r"([a-z][a-z0-9+ -]{2,30}?)(?=\s+(?:along|with|too|as well|also|bhi|saath|please|pls)\b|\s*[?.!]|\s*$)", re.I)
+_ITEM_STOP = {"it", "this", "that", "them", "slot", "booking", "appointment", "reminder", "details", "time", "delivery", "help", "info", "more", "photo"}
+
+
 def _when(message: str) -> Optional[str]:
     m = _WHEN.search(message or "")
     return m.group(0) if m else None
@@ -116,6 +133,9 @@ class ConversationState:
     delivered: list = field(default_factory=list)                # (kind, offer) of every artifact already delivered
     cust_stage: str = ""                                         # customer booking flow: "" | "ask_time" | "booked"
     booked: Optional[str] = None                                 # the slot the customer booked
+    partial_day: Optional[str] = None                            # customer gave a day but no time yet ("kal")
+    fulfil: Optional[str] = None                                 # pharmacies: "delivery" | "pickup"
+    order_items: list = field(default_factory=list)              # extra items the customer asked to add
 
     def bot_bodies(self) -> list[str]:
         return [m["body"] for m in self.messages if m["from"] == "vera"]
@@ -1062,12 +1082,30 @@ class ReplyEngine:
         first = (w["cust"].first_name if w.get("cust") else "") or ""
         slots = [b.A(k) for k in ("slot1", "slot2") if b.A(k)]
         o = b.P("offer") or b.offer()[0]
-        say = lambda *opts: self._send(state, w, list(opts), "open_ended", why)          # noqa: E731
+        say = lambda *opts: self._send(state, w, [o_[:1].upper() + o_[1:] for o_ in opts], "open_ended", why)   # noqa: E731
 
         def mid(t_):
             return t_[0].lower() + t_[1:] if t_ and re.match(r"(Today|Tomorrow|Day after|This weekend|Next week)", t_) else t_
 
+        pharmacy = b.prof.slug == "pharmacies"
+        L = lambda t_: loc_time(t_, b.lang)                                                  # noqa: E731
+
+        def book_text(t_):
+            if pharmacy and state.fulfil == "pickup":
+                return (f"Ready for pickup ✅ {t_} at {name}" + (f", {where}" if where else "") + ". Reply CHANGE to move it.",
+                        f"Pickup ready ✅ {L(t_)}, {name}" + (f", {where}" if where else "") + ". Time badalna ho toh CHANGE reply karein.")
+            if pharmacy:
+                extra = f" (with {', '.join(state.order_items)})" if state.order_items else ""
+                extra_hi = f" ({', '.join(state.order_items)} ke saath)" if state.order_items else ""
+                return (f"Order placed ✅ Your refill{extra} will be delivered {mid(t_)} to your saved address. Reply CHANGE to move it.",
+                        f"Order ho gaya ✅ Aapka refill{extra_hi} {L(t_)} aapke saved address pe deliver hoga. Time badalna ho toh CHANGE reply karein.")
+            return (f"Booked ✅ {t_} at {name}" + (f", {where}" if where else "") + ". We'll send a reminder before your visit. Reply CHANGE anytime to reschedule.",
+                    f"Booked ✅ {L(t_)}, {name}" + (f", {where}" if where else "") + " mein. Visit se pehle reminder bhejenge. Reschedule karna ho toh CHANGE reply karein.")
+
         def slot_menu():
+            if pharmacy and not state.fulfil:
+                return b.t("Home delivery or pick up from the store? And which day and time suits you?",
+                           "Home delivery chahiye ya store se pickup? Aur kaunsa din aur time theek rahega?")
             if len(slots) >= 2:
                 return b.t(f"Pick one: 1) {slots[0]} or 2) {slots[1]} — reply 1 or 2, or send another day/time.",
                            f"Ek chuniye: 1) {slots[0]} ya 2) {slots[1]} — 1 ya 2 reply karein, ya koi aur din/time bhejiye.")
@@ -1079,35 +1117,72 @@ class ReplyEngine:
             return {"action": "end", "rationale": "Customer declined/opted out — no further messages on behalf of the merchant."}
         if mi == "later" and not cust_time(message):
             return {"action": "wait", "wait_seconds": IntentRouter.wait_seconds(message), "rationale": "Customer asked for later."}
+        # 0a) pharmacy: delivery or pickup
+        if pharmacy and re.search(r"\b(deliver\w*|home|ghar|bhej do|send it)\b", low):
+            state.fulfil = "delivery"
+        elif pharmacy and re.search(r"\b(pick ?up|collect|aake|aa ke|store se|shop se|khud)\b", low):
+            state.fulfil = "pickup"
+        # 0b) "can you bring paracetamol too?" → add to the order / pass to the team
+        im = _ITEM_REQ.search(message)
+        item = im.group(1).strip() if im else None
+        if item and item.lower() not in _ITEM_STOP and not cust_time(item):
+            state.order_items.append(item)
+            status = b.t(f" Your {'delivery' if pharmacy and state.fulfil != 'pickup' else 'booking'} is set for {mid(state.booked)}." if state.booked else " " + slot_menu(),
+                         f" Aapki {'delivery' if pharmacy and state.fulfil != 'pickup' else 'booking'} {L(state.booked)} ki hai." if state.booked else " " + slot_menu())
+            why = "Customer asked to add an item → added to the order / passed to the team (no invented price or stock)."
+            if pharmacy:
+                return say(b.t(f"Sure ✅ I've added {item} to your order — the pharmacist will confirm the strength and price when packing it.{status}",
+                               f"Zaroor ✅ {item} aapke order mein add kar diya — pharmacist packing ke waqt strength aur price confirm karenge.{status}"))
+            return say(b.t(f"Noted ✅ I've passed '{item}' to the {name} team — they'll confirm on this chat.{status}",
+                           f"Noted ✅ '{item}' ki request {name} team ko bhej di hai — woh isi chat pe confirm karenge.{status}"))
         # 1) picked a numbered slot
         pick = re.fullmatch(r"\s*([12])\s*[.!)]?\s*", low)
         if pick and len(slots) >= int(pick.group(1)):
             state.booked, state.cust_stage = slots[int(pick.group(1)) - 1], "booked"
             why = "Customer picked a slot → booked."
-            return say(b.t(f"Booked ✅ {state.booked} at {name}" + (f", {where}" if where else "") + ". We'll remind you before. Reply CHANGE to reschedule.",
-                           f"Booked ✅ {state.booked}, {name}" + (f", {where}" if where else "") + " mein. Pehle reminder bhejenge. Reschedule ke liye CHANGE reply karein."))
-        # 2) proposed a day / time → book it
+            en_, hi_ = book_text(state.booked)
+            return say(b.t(en_, hi_))
+        # 2) proposed a day / time → book it (a bare day asks for the time first)
         t = cust_time(message)
+        if t and state.partial_day and not re.match(r"(Today|Tomorrow|Day after|This weekend|Next week|Mon|Tue|Wed|Thu|Fri|Sat|Sun)", t):
+            t = f"{state.partial_day} {t[0].lower() + t[1:]}".replace(" ,", ",")
+        elif not t and state.partial_day and re.search(r"\b(morning|afternoon|evening|night|subah|dopahar|shaam|sham|raat)\b", low):
+            t = cust_time(f"{state.partial_day} {low}")
+        bare_day = t and re.fullmatch(r"(Today|Tomorrow|Day after tomorrow|This weekend|Next week|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)", t)
+        if bare_day:
+            state.partial_day, state.cust_stage = t, "ask_time"
+            why = "Customer gave a day without a time → confirm the day, ask morning/evening."
+            return say(b.t(f"{t} works ✅ Morning or evening — or a specific time?", f"{L(t)} theek hai ✅ Subah ya shaam — ya koi exact time?"),
+                       b.t(f"Great, {mid(t)}. What time suits you?", f"Badhiya, {L(t)}. Kaunsa time theek rahega?"))
         if t and not re.search(r"\b(timing|timings|open|khula|close|band)\b", low):
-            state.booked, state.cust_stage = t, "booked"
+            state.booked, state.cust_stage, state.partial_day = t, "booked", None
             why = "Customer proposed a time → booked it and confirmed the details."
-            return say(b.t(f"Booked ✅ {t} at {name}" + (f", {where}" if where else "") + ". We'll send a reminder before your visit. Reply CHANGE anytime to reschedule.",
-                           f"Booked ✅ {t}, {name}" + (f", {where}" if where else "") + " mein. Visit se pehle reminder bhejenge. Reschedule karna ho toh CHANGE reply karein."),
-                       b.t(f"Done ✅ You're booked for {t}. See you at {name}!", f"Ho gaya ✅ {t} ke liye booking pakki. {name} mein milte hain!"))
+            en_, hi_ = book_text(t)
+            return say(b.t(en_, hi_), b.t(f"Done ✅ All set for {mid(t)}.", f"Ho gaya ✅ {L(t)} ke liye sab set."))
         # 2b) "slot booked?" / "is it confirmed?" → direct status answer
         if re.search(r"\b(booked|confirmed?|confirm hua|book hua|ho gaya|hua kya|pakka)\b.*\?|^\s*(is|was)\s+(my|the)\s+(slot|appointment|booking)", low) \
                 or re.search(r"\b(slot|appointment|booking)\b[^.?!]{0,20}\b(booked|confirmed?|done|pakka|hua)\b", low):
             why = "Customer asked for booking status → direct answer."
+            if state.booked and pharmacy:
+                kind_en = "pickup" if state.fulfil == "pickup" else "delivery"
+                return say(b.t(f"Yes ✅ Your refill {kind_en} is confirmed for {mid(state.booked)}" + (f" (with {', '.join(state.order_items)})" if state.order_items else "") + ". Reply CHANGE to move it.",
+                               f"Haan ✅ Aapka refill {kind_en} {L(state.booked)} ke liye confirm hai" + (f" ({', '.join(state.order_items)} ke saath)" if state.order_items else "") + ". Time badalna ho toh CHANGE reply karein."),
+                           b.t(f"Confirmed ✅ {kind_en.capitalize()} {mid(state.booked)}.", f"Confirm ✅ {kind_en.capitalize()} {L(state.booked)}."))
             if state.booked:
                 return say(b.t(f"Yes ✅ You're booked for {mid(state.booked)} at {name}" + (f", {where}" if where else "") + ". Reply CHANGE to reschedule.",
-                               f"Haan ✅ Aapki booking {state.booked}, {name} mein pakki hai. Reschedule ke liye CHANGE reply karein."),
+                               f"Haan ✅ Aapki booking {L(state.booked)}, {name} mein pakki hai. Reschedule ke liye CHANGE reply karein."),
                            b.t(f"Confirmed ✅ {state.booked} at {name}. We'll remind you before the visit.",
-                               f"Confirm hai ✅ {state.booked}, {name}. Visit se pehle reminder bhejenge."),
-                           b.t(f"All good — your {mid(state.booked)} slot is locked in 🙂", f"Sab theek — aapka {state.booked} ka slot pakka hai 🙂"))
+                               f"Confirm hai ✅ {L(state.booked)}, {name}. Visit se pehle reminder bhejenge."),
+                           b.t(f"All good — your {mid(state.booked)} slot is locked in 🙂", f"Sab theek — aapka {L(state.booked)} ka slot pakka hai 🙂"))
             state.cust_stage = "ask_time"
             return say(b.t("Not yet — send me a day and time (for example 'tomorrow 5pm') and I'll book it right away.",
                            "Abhi nahi — ek din aur time bhej dijiye (jaise 'kal 5 baje'), main turant book kar dungi."),
                        b.t("Not booked yet — just tell me which day and time suits you.", "Abhi booking nahi hui — bas din aur time bata dijiye."))
+        if pharmacy and state.fulfil and not state.booked and re.search(r"\b(deliver\w*|home|ghar|pick ?up|collect|store|shop)\b", low):
+            why = "Pharmacy customer chose delivery/pickup → ask the time."
+            what_en = "Home delivery" if state.fulfil == "delivery" else "Store pickup"
+            what_hi = "Home delivery" if state.fulfil == "delivery" else "Store pickup"
+            return say(b.t(f"{what_en} it is ✅ Which day and time suits you?", f"{what_hi} ✅ Kaunsa din aur time theek rahega?"))
         # 3) reschedule
         if re.search(r"\b(change|reschedule|another time|different time|dusra time|time badal|shift)\b", low):
             state.cust_stage = "ask_time"
@@ -1117,7 +1192,7 @@ class ReplyEngine:
         # 4) questions: timings / where / price / what is this
         if re.search(r"\b(timings?|time kya|hours|open|kab tak|kab khula|khula|closing|kitne baje)\b", low):
             why = "Customer asked about timings → answer from the slots we have, ask for a preference."
-            booked = b.t(f" You're booked for {mid(state.booked)}.", f" Aapki booking {state.booked} ki hai.") if state.booked else ""
+            booked = b.t(f" You're booked for {mid(state.booked)}.", f" Aapki booking {L(state.booked)} ki hai.") if state.booked else ""
             if slots:
                 return say(b.t(f"Open slots right now: {' or '.join(slots)}.{booked} Reply 1 or 2, or tell us a time that suits you.",
                                f"Abhi ke slots: {' ya '.join(slots)}.{booked} 1 ya 2 reply karein, ya apna time bataiye."))
@@ -1128,7 +1203,7 @@ class ReplyEngine:
         if re.search(r"\b(where|address|location|kahan|kaha|pata|direction)\b", low):
             why = "Customer asked where → location from the merchant profile."
             return say(b.t(f"We're at {name}" + (f", {where}" if where else "") + ". " + ("You're booked for " + mid(state.booked) + "." if state.booked else slot_menu()),
-                           f"Hum {name}" + (f", {where}" if where else "") + " mein hain. " + ("Aapki booking " + state.booked + " ki hai." if state.booked else slot_menu())))
+                           f"Hum {name}" + (f", {where}" if where else "") + " mein hain. " + ("Aapki booking " + L(state.booked) + " ki hai." if state.booked else slot_menu())))
         if re.search(r"\b(price|cost|charges?|fees?|kitna|kitne ka|rate|offer|paise|₹)\b", low):
             why = "Customer asked the price → only the merchant's real offer, never an invented price."
             return say(b.t((f"Current offer: {o}. " if o else f"{name} will share the exact price when confirming. ") + slot_menu(),
@@ -1147,8 +1222,8 @@ class ReplyEngine:
         if mi == "explicit_action" or re.fullmatch(r"(ok|okay|okk|haan|ha|ji|yes|sure)[\s!.]*", low):
             why = "Customer said yes → move to booking (offer slots or ask day + time)."
             if state.booked:
-                return say(b.t(f"You're all set for {mid(state.booked)} 🙂 See you then!", f"Aapki booking {state.booked} ki pakki hai 🙂 Milte hain!"),
-                           b.t(f"All confirmed for {mid(state.booked)}. Reply CHANGE if you need a different time.", f"{state.booked} ke liye sab confirm hai. Time badalna ho toh CHANGE reply karein."))
+                return say(b.t(f"You're all set for {mid(state.booked)} 🙂 See you then!", f"Aapki booking {L(state.booked)} ki pakki hai 🙂 Milte hain!"),
+                           b.t(f"All confirmed for {mid(state.booked)}. Reply CHANGE if you need a different time.", f"{L(state.booked)} ke liye sab confirm hai. Time badalna ho toh CHANGE reply karein."))
             if state.cust_stage == "ask_time":
                 return say(b.t("Just send a day and time (for example 'tomorrow 6pm') and I'll book it for you.",
                                "Bas ek din aur time bhej dijiye (jaise 'kal shaam 6 baje'), main book kar dungi."),
@@ -1161,16 +1236,20 @@ class ReplyEngine:
         # 6) thanks
         if _ACK.match(message):
             why = "Customer said thanks → warm close or the one next step."
+            if state.booked and pharmacy:
+                arrive_en = "is ready for pickup" if state.fulfil == "pickup" else "arrives"
+                arrive_hi = "pickup ke liye ready hoga" if state.fulfil == "pickup" else "pahunch jaayega"
+                return say(b.t(f"You're welcome! Your refill {arrive_en} {mid(state.booked)} 🙂", f"Shukriya! Aapka refill {L(state.booked)} {arrive_hi} 🙂"))
             if state.booked:
-                return say(b.t(f"You're welcome! See you {mid(state.booked)} 🙂" if re.match(r"(Today|Tomorrow)", state.booked) else f"You're welcome! See you on {state.booked} 🙂", f"Shukriya! {state.booked} ko milte hain 🙂"))
+                return say(b.t(f"You're welcome! See you {mid(state.booked)} 🙂" if re.match(r"(Today|Tomorrow)", state.booked) else f"You're welcome! See you on {state.booked} 🙂", f"Shukriya! {L(state.booked)} milte hain 🙂"))
             return say(b.t("You're welcome! " + slot_menu(), "Shukriya! " + slot_menu()))
         # 7) "hello?", "?", anything unclear → the next step for where we are, never the same line twice
         why = "Unclear / nudge → restate the next step for the current stage."
         if state.booked:
             return say(b.t(f"You're booked for {mid(state.booked)} at {name}. Reply CHANGE to reschedule, or ask me anything about your visit.",
-                           f"Aapki booking {state.booked}, {name} mein hai. Reschedule ke liye CHANGE reply karein, ya visit ke baare mein kuch bhi poochiye."),
+                           f"Aapki booking {L(state.booked)}, {name} mein hai. Reschedule ke liye CHANGE reply karein, ya visit ke baare mein kuch bhi poochiye."),
                        b.t(f"Hi{' ' + first if first else ''} 🙂 All set for {mid(state.booked)}. Anything else I can help with?",
-                           f"Hi{' ' + first if first else ''} 🙂 {state.booked} ke liye sab set hai. Aur kuch madad chahiye?"))
+                           f"Hi{' ' + first if first else ''} 🙂 {L(state.booked)} ke liye sab set hai. Aur kuch madad chahiye?"))
         return say(b.t(f"Hi{' ' + first if first else ''} 🙂 " + slot_menu(), f"Hi{' ' + first if first else ''} 🙂 " + slot_menu()),
                    b.t("Just send a day and time (for example 'tomorrow 6pm') and we'll book it for you.",
                        "Bas ek din aur time bhej dijiye (jaise 'kal shaam 6 baje'), hum book kar denge."),

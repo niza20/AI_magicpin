@@ -312,3 +312,20 @@ def test_customer_time_parser():
     assert cust_time("kal shaam 6 baje") == "Tomorrow evening, 6pm"
     assert cust_time("saturday evening") == "Saturday evening"
     assert cust_time("what are the timings") is None and cust_time("hello ?") is None
+
+
+def test_pharmacy_refill_flow_day_then_time_items_and_hindi():
+    from vera.dataset import load_dataset
+    import os
+    ds = load_dataset(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "dataset", "expanded"))
+    t = ds.triggers["trg_072_customer_lapsed_soft_m_049_komal_pharmaci"]; m = ds.merchants[t["merchant_id"]]
+    c = ds.customers[t["customer_id"]]; cat = ds.category_for(m)
+    st = new_state("ph", cat, m, t, c, compose(cat, m, t, c)["body"])
+    assert "pickup" in respond(st, "Yes, go ahead")["body"].lower(), "pharmacy asks delivery vs pickup"
+    r = respond(st, "kal")
+    assert "Subah ya shaam" in r["body"] or "Morning or evening" in r["body"], "a bare day asks for the time"
+    r = respond(st, "evening")
+    assert "deliver" in r["body"].lower() and ("kal shaam" in r["body"] or "tomorrow evening" in r["body"].lower())
+    st.language, st.language_locked = "hi", True
+    r = respond(st, "can you bring paracetamol along with you?")
+    assert "paracetamol" in r["body"] and "pharmacist" in r["body"] and "कल शाम" in r["body"]
