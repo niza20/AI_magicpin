@@ -817,6 +817,29 @@ def chat_delete(chat_id: str, owner: str = ""):
     return {"deleted": ok}
 
 
+_FEATURE_STATS: dict = {}
+
+
+@router.get("/demo/api/features")
+def features():
+    """Headline numbers for the Features tab — computed live from the official dataset, cached."""
+    if not _FEATURE_STATS:
+        ds = _dataset()
+        stats = {"agents": 15, "judge_tests": len(REPLAYS) + 1, "custom_situations": len(CUSTOM_TEMPLATES), "languages": 3}
+        if ds:
+            fallbacks = 0
+            for t in ds.triggers.values():
+                m = ds.merchants.get(t.get("merchant_id"))
+                if not m:
+                    continue
+                c = ds.customers.get(t.get("customer_id")) if t.get("customer_id") else None
+                fallbacks += bool(_orch.compose(ds.category_for(m), m, t, c).extras.get("fallback"))
+            stats.update(categories=len(ds.categories), merchants=len(ds.merchants), customers=len(ds.customers),
+                         triggers=len(ds.triggers), fallbacks=fallbacks, test_pairs=len(load_pairs(str(_DS_DIR / "test_pairs.json"))))
+        _FEATURE_STATS.update(stats)
+    return _FEATURE_STATS
+
+
 @router.get("/demo", response_class=HTMLResponse)
 def page():
     return HTMLResponse(_PAGE)
@@ -863,6 +886,20 @@ select{background:var(--panel);color:var(--ink);border:1px solid var(--line);bor
 .form .hint{font-size:12px;color:var(--muted);margin:0}
 details.ctx summary{cursor:pointer;font-size:13px;color:var(--accent)}details.ctx pre{font-size:11px;background:var(--bg);padding:8px;border-radius:6px;overflow:auto;max-height:320px}
 .row .del{margin-left:auto;border:0;background:none;color:var(--muted);font-size:18px;cursor:pointer;padding:0 4px;visibility:hidden}.row:hover .del{visibility:visible}
+.feat{padding:18px 4% 40px;max-width:1100px;margin:0 auto}.feat .hero{background:linear-gradient(135deg,var(--accent),#0b5d52);color:#fff;border-radius:16px;padding:22px 24px;display:flex;gap:18px;align-items:center;flex-wrap:wrap}
+.feat .hero h2{margin:0 0 6px;font-size:22px}.feat .hero p{margin:0;opacity:.92;max-width:620px;font-size:14px;line-height:1.5}.feat .hero .go{margin-left:auto;background:#fff;color:#0b5d52;border:0;border-radius:22px;padding:11px 18px;font-weight:700;font-size:14px;cursor:pointer}
+.feat .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin:14px 0 6px}.feat .stat{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px}.feat .stat b{display:block;font-size:22px;color:var(--accent)}.feat .stat span{font-size:12px;color:var(--muted)}
+.feat h3{margin:22px 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:var(--accent)}
+.feat .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:10px}.feat .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:6px}
+.feat .card b{font-size:14.5px}.feat .card p{margin:0;font-size:13px;color:var(--muted);line-height:1.45;flex:1}.feat .card .pn{font-size:11px;color:var(--accent);font-weight:600}.feat .card button{align-self:flex-start;margin-top:4px;background:var(--chip);color:var(--accent);border:0;border-radius:16px;padding:6px 12px;font-weight:600;font-size:12.5px;cursor:pointer}
+.feat .flow{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:12px}.feat .flow span{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:4px 10px}.feat .flow i{color:var(--muted);font-style:normal}
+.feat code{font-size:12px;background:var(--bg);padding:1px 5px;border-radius:4px}
+#tourHole{position:fixed;z-index:60;border-radius:12px;box-shadow:0 0 0 9999px rgba(8,12,16,.62);pointer-events:none;transition:all .25s ease;outline:2px solid var(--accent2)}
+#tourCard{position:fixed;z-index:61;width:340px;max-width:calc(100vw - 32px);background:var(--panel);color:var(--ink);border-radius:14px;padding:14px 16px 12px;box-shadow:0 10px 30px rgba(0,0,0,.35);transition:top .25s,left .25s}
+#tourCard small{color:var(--accent);font-weight:700;font-size:11px;letter-spacing:.05em;text-transform:uppercase}#tourCard h4{margin:4px 0 6px;font-size:16px}#tourCard p{margin:0 0 10px;font-size:13.5px;line-height:1.5;color:var(--ink)}
+#tourCard .tb{display:flex;gap:8px;align-items:center}#tourCard .tb button{border:0;border-radius:18px;padding:7px 14px;font-weight:600;cursor:pointer}#tourCard .nx{background:var(--accent);color:#fff}#tourCard .bk{background:var(--chip);color:var(--ink)}#tourCard .x{margin-left:auto;background:none!important;color:var(--muted)!important;padding:4px!important}
+#tourCard .dots{display:flex;gap:4px;margin-bottom:8px}#tourCard .dots i{width:18px;height:3px;border-radius:2px;background:var(--line)}#tourCard .dots i.on{background:var(--accent)}
+@media (max-width:900px){#tourCard{left:16px!important;right:16px;bottom:16px;top:auto!important;width:auto}}
 .post{max-width:380px;margin:4px 10px 8px;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--panel)}.post img{display:block;width:100%;max-height:190px;object-fit:cover}.post .pl{font-size:11px;color:var(--muted);padding:6px 10px 0;text-transform:uppercase;letter-spacing:.05em}.post .pt{padding:4px 10px 9px;font-size:14px}
 .u img{display:block;max-width:260px;border-radius:6px;margin:4px}
 .why{border:0;background:none;color:var(--muted);font-size:11px;cursor:pointer;padding:0 9px 5px}.why:hover{color:var(--accent)}
@@ -887,10 +924,10 @@ mark{border-radius:3px;padding:0 1px;color:inherit}mark.merchant{background:rgba
 .verdict{display:table;margin:14px auto;padding:9px 16px;border-radius:10px;font-weight:700}.verdict.ok{background:var(--good);color:var(--goodink)}.verdict.no{background:var(--bad);color:var(--badink)}
 .day{background:var(--them);border-radius:10px;padding:10px 12px;margin:10px 0;box-shadow:var(--shadow)}.day h5{margin:0 0 4px;font-size:13px}.day h5 small{color:var(--muted);font-weight:400}
 #pick{display:none}
-@media (max-width:900px){.shell,.shell.drawer{grid-template-columns:1fr}#side{display:none}.shell.custom #side{display:block;max-height:48vh;border-right:0;border-bottom:1px solid var(--line)}#pick{display:block;max-width:60vw}#drawer{position:fixed;inset:59px 0 0 12%;z-index:5;box-shadow:-4px 0 18px rgba(0,0,0,.2)}.steps{grid-template-columns:1fr}#log{padding:12px 3%}.b{max-width:90%}}
+@media (max-width:900px){.nav{max-width:100%;overflow-x:auto;scrollbar-width:none}.nav::-webkit-scrollbar{display:none}.nav button{flex:none}.shell.featmode #side{display:none}.shell,.shell.drawer{grid-template-columns:1fr}#side{display:none}.shell.custom #side{display:block;max-height:48vh;border-right:0;border-bottom:1px solid var(--line)}#pick{display:block;max-width:60vw}#drawer{position:fixed;inset:59px 0 0 12%;z-index:5;box-shadow:-4px 0 18px rgba(0,0,0,.2)}.steps{grid-template-columns:1fr}#log{padding:12px 3%}.b{max-width:90%}}
 </style></head><body>
 <header class="app"><div class="logo">VERA</div><div class="brand"><b>Vera by magicpin</b><span>AI assistant for local merchants on WhatsApp — live demo</span></div>
-<div class="nav" id="nav"><button data-m="chat" class="on">Live chat</button><button data-m="tests">Judge tests</button><button data-m="week">Weekly plan</button><button data-m="custom">Try your own</button><button data-m="history">History</button></div>
+<div class="nav" id="nav"><button data-m="chat" class="on">Live chat</button><button data-m="tests">Judge tests</button><button data-m="week">Weekly plan</button><button data-m="custom">Try your own</button><button data-m="history">History</button><button data-m="features">Features</button></div>
 <div class="sp"></div><select id="pick"></select>
 <select id="lang" title="Message language"><option value="auto">🌐 Auto (from profile)</option><option value="en">English</option><option value="hi-en">Hinglish</option><option value="hi">हिन्दी</option></select></header>
 <div class="shell" id="shell">
@@ -975,11 +1012,94 @@ function side(){const el=$('#side'),pk=$('#pick');let h='',opts='<option value="
   el.innerHTML=h;document.querySelectorAll('.row').forEach(n=>n.onclick=()=>n.dataset.t==='inject'?runInject():runTest(n.dataset.t));TESTS.forEach(t=>opts+=`<option value="${t[0]}">${t[1]}</option>`)}
  else if(MODE==='custom'){customForm(el)}
  else if(MODE==='history'){historyList(el)}
+ else if(MODE==='features'){featureSide(el)}
  else{const seen=new Set();const ms=SC.filter(x=>x.audience==='merchant'&&!seen.has(x.merchant_id)&&seen.add(x.merchant_id));
   el.innerHTML='<div class="gh">Pick a merchant</div>'+ms.map(x=>`<div class="row" data-m="${x.merchant_id}"><div class="ra" style="background:${color(x.merchant)}">${ini(x.merchant)}</div><div class="tx"><b>${esc(x.merchant)}</b><span>${esc(x.category)}</span></div></div>`).join('');
   document.querySelectorAll('.row').forEach(n=>n.onclick=()=>week(SC.find(x=>x.merchant_id===n.dataset.m)));ms.forEach(x=>opts+=`<option value="${x.merchant_id}">${esc(x.merchant)}</option>`)}
- pk.innerHTML=opts;pk.style.display=(MODE==='custom'||MODE==='history')?'none':''}
+ pk.innerHTML=opts;pk.style.display=(MODE==='custom'||MODE==='history'||MODE==='features')?'none':''}
 $('#pick').onchange=e=>{const v=e.target.value;if(!v)return;if(MODE==='chat')start(SC.find(x=>x.id===v));else if(MODE==='tests')(v==='inject'?runInject():runTest(v));else week(SC.find(x=>x.merchant_id===v))};
+
+// ---------- features overview + guided tour (Supademo-style, but on the live app)
+const go=m=>{const b=$(`#nav button[data-m="${m}"]`);if(b)b.click()};
+const pick=f=>SC.find(f)||SC[0];
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+async function until(sel,ms=6000){const t=Date.now();while(Date.now()-t<ms){const e=typeof sel==='function'?sel():$(sel);if(e)return e;await sleep(120)}return null}
+const lastV=()=>{const a=document.querySelectorAll('#log .b.v');return a[a.length-1]};
+const openScenario=async f=>{go('chat');await start(pick(f));await until('#log .b.v')};
+const FEATURES=[
+ {g:'Every message is grounded',items:[
+  {t:'Built from the merchant\'s real data',p:'Names, numbers, offers and reviews come from the four context layers — category, merchant, trigger, customer. Nothing is invented.',pn:'Brief §5.8 — don\'t fabricate',run:async()=>{await openScenario(x=>x.merchant.startsWith('Mylari'));HL=true;insights();drawer(true)}},
+  {t:'Fact-checked before sending',p:'A deterministic fact checker verifies every number, offer, date, citation and competitor against the contexts. Failing drafts are rewritten or replaced by a safe message.',pn:'Checked by scripts/verify_brief.py · 0 fallbacks on 100 triggers',run:async()=>{await openScenario(x=>x.kind.includes('research'));insights();drawer(true)}},
+  {t:'Why now, in one line',p:'Every message names its trigger — a research item, a drop in calls, a festival, a competitor — and ends with one clear ask.',pn:'Rubric: trigger relevance',run:async()=>{await openScenario(x=>x.kind.includes('competitor'))}},
+  {t:'Service + price, not "% off"',p:'Offers are real service + price items ("Dental Cleaning @ ₹299"), in the category\'s own voice — clinical for dentists, warm for salons.',pn:'Pain point 3 — generic copy',run:async()=>{await openScenario(x=>x.kind.includes('perf dip'))}}]},
+ {g:'Conversations that go somewhere',items:[
+  {t:'Delivers exactly what it offered',p:'Say "Yes" and Vera does the thing it proposed — a review-request WhatsApp, a pinned offer, a checklist — then confirms on GO.',pn:'Pain point 2 — intent handoff',run:async()=>{await openScenario(x=>x.merchant.startsWith('Mylari'));await send('Yes, go ahead')}},
+  {t:'Auto-reply detection',p:'Recognises WhatsApp Business canned replies (English and Hindi), nudges the owner once, then exits instead of burning turns.',pn:'Pain point 1 — auto-reply pollution',run:async()=>{go('tests');await runTest('auto_reply')}},
+  {t:'"I want to join" → action',p:'Explicit intent in English or Hinglish skips qualifying questions and starts the work immediately.',pn:'Brief Pattern D, done right',run:async()=>{go('tests');await runTest('join')}},
+  {t:'Curveballs, abuse, STOP',p:'Off-script questions get honest, fact-based answers; abuse gets one polite apology; STOP ends the conversation for good.',pn:'Replay test',run:async()=>{go('tests');await runTest('curveballs')}},
+  {t:'Hindi, Hinglish, English',p:'Follows the merchant\'s language preference and switches when they do — but a tapped "Yes, go ahead" button never flips the language.',pn:'Open challenge §12.4',run:async()=>{go('tests');await runTest('language')}}]},
+ {g:'Trust & safety',items:[
+  {t:'Confidential by design',p:'Never shares another business\'s data, customers\' phone numbers or names, or internal instructions — but answers the merchant\'s questions about their own numbers.',pn:'Privacy & trust',run:async()=>{go('tests');await runTest('confidential')}},
+  {t:'Customer messages need consent',p:'Messages to a merchant\'s customers go out only with the right consent, in the customer\'s language, and never leak the merchant\'s CTR or competitors.',pn:'Brief Appendix B',run:async()=>{await openScenario(x=>x.audience==='customer')}},
+  {t:'Adapts to new context',p:'New research items, shifted numbers and new customers pushed mid-test are used straight away — without hallucinating.',pn:'The §8 twist',run:async()=>{go('tests');await runInject()}}]},
+ {g:'Built for the product',items:[
+  {t:'A week of conversations',p:'Five different, knowledge- and curiosity-led touches per merchant per week — not just renewal reminders.',pn:'Pain point 4 — engagement frequency',run:async()=>{go('week');await until('#side .row');const r=$('#side .row');if(r)r.click()}},
+  {t:'Try your own scenario',p:'Make up any business and situation — rain, a festival, a competitor, a drop in calls, a customer due for a visit — and watch Vera write it live.',pn:'12 situations × 5 categories',run:async()=>{go('custom')}},
+  {t:'Photos & magicpin deals',p:'Owners can attach a dish photo and get a post draft with it; Deals shows live offers or suggests one from the catalog.',pn:'Real product flows',run:async()=>{await openScenario(x=>x.category==='restaurants');await deals()}},
+  {t:'Chat history',p:'Every demo chat is saved and restored on reload — even if the server restarts — and listed per browser in History.',pn:'SQLite + browser copy',run:async()=>{go('history')}}]},
+];
+async function featurePage(){const st=await (await fetch('/demo/api/features')).json().catch(()=>({}));
+ const stat=(v,l)=>v==null?'':`<div class="stat"><b>${esc(v)}</b><span>${esc(l)}</span></div>`;
+ let h=`<div class="feat"><div class="hero"><div><h2>Vera — a merchant assistant that does the work</h2><p>A team of ${st.agents||15} specialised AI agents reads each merchant's real data, decides why to message today, writes in their language, checks every fact, and turns a “yes” into finished work.</p></div><button class="go" onclick="tour.start()">▶ Start the guided tour</button></div>
+ <div class="stats">${stat(st.test_pairs,'official test pairs')}${stat(st.triggers,'triggers composed')}${stat(st.fallbacks,'fallback messages')}${stat(st.categories,'categories')}${stat(st.judge_tests,'judge replay tests')}${stat(st.custom_situations,'“try your own” situations')}${stat(st.languages,'languages')}</div>
+ <h3>How a message is made</h3><div class="flow"><span>Context analyst</span><i>→</i><span>Trigger analyst</span><i>→</i><span>Category expert</span><i>→</i><span>Personalisation</span><i>→</i><span>Customer & consent</span><i>→</i><span>Language</span><i>→</i><span>Strategy</span><i>→</i><span>Composer</span><i>→</i><span>Fact checker</span><i>→</i><span>Policy checker</span><i>→</i><span>Engagement critic</span><i>→</i><span>Rewriter</span><i>→</i><span>Finalizer</span></div>`;
+ FEATURES.forEach((g,gi)=>{h+=`<h3>${esc(g.g)}</h3><div class="grid">`+g.items.map((f,i)=>`<div class="card" id="fc_${gi}_${i}"><b>${esc(f.t)}</b><p>${esc(f.p)}</p><span class="pn">${esc(f.pn)}</span><button data-f="${gi}_${i}">See it live →</button></div>`).join('')+'</div>'});
+ h+=`<h3>For the judge's harness</h3><div class="grid"><div class="card"><b>The /v1 API</b><p><code>POST /v1/context</code> · <code>/v1/tick</code> · <code>/v1/reply</code> · <code>/v1/teardown</code> · <code>GET /v1/healthz</code> · <code>/v1/metadata</code> — idempotent versions, 409 on stale, ≤20 actions per tick, replies in milliseconds.</p><span class="pn">Testing brief §2</span><button onclick="window.open('/v1/healthz','_blank')">Open /v1/healthz →</button></div>
+ <div class="card"><b>Verify it yourself</b><p><code>python scripts/verify_brief.py</code> runs every checkable requirement from both briefs against the bot; <code>python scripts/run_judge.py URL full_evaluation</code> runs magicpin's own judge simulator.</p><span class="pn">Reproducible</span></div></div></div>`;
+ $('#log').innerHTML=h;$('#log').scrollTop=0;
+ $('#log').querySelectorAll('[data-f]').forEach(b=>b.onclick=()=>{const [gi,i]=b.dataset.f.split('_').map(Number);FEATURES[gi].items[i].run()})}
+function featureSide(el){el.innerHTML='<div class="gh">Features</div><div class="row" id="tourRow"><div class="ra" style="background:var(--accent)">▶</div><div class="tx"><b>Guided tour</b><span>12 steps · about 2 minutes</span></div></div>'+
+ FEATURES.map((g,gi)=>`<div class="gh">${esc(g.g)}</div>`+g.items.map((f,i)=>`<div class="row" data-f="${gi}_${i}"><div class="ra" style="background:${color(f.t)}">${gi+1}.${i+1}</div><div class="tx"><b>${esc(f.t)}</b><span>${esc(f.pn)}</span></div></div>`).join('')).join('');
+ $('#tourRow').onclick=()=>tour.start();
+ el.querySelectorAll('[data-f]').forEach(n=>n.onclick=()=>{const [gi,i]=n.dataset.f.split('_').map(Number);FEATURES[gi].items[i].run()})}
+const TOUR=[
+ {t:'Welcome to Vera',p:'A merchant assistant for magicpin that talks to business owners on WhatsApp. This 2-minute tour runs the real app — every message you see is generated live.',el:()=>$('#nav'),run:async()=>{}},
+ {t:'A message built from real data',p:'Mylari South Indian Cafe is 5 reviews from 150. Vera cites the real count, what reviewers praise and the local average — then makes one clear offer.',el:()=>lastV(),run:async()=>{await openScenario(x=>x.merchant.startsWith('Mylari'))}},
+ {t:'Every fact has a source',p:'Insights shows why Vera messaged now, where each fact came from, the quality checks it passed, and how it compares to a generic message.',el:()=>$('#drawer'),run:async()=>{insights();drawer(true);await sleep(250)}},
+ {t:'A “yes” becomes finished work',p:'The owner taps “Yes, go ahead”. Vera delivers exactly what it offered — the review-request WhatsApp — ready to send on GO. No qualifying questions.',el:()=>lastV(),run:async()=>{drawer(false);await send('Yes, go ahead');await sleep(300)}},
+ {t:'Their language, every turn',p:'Messages follow each merchant\'s preference — English, Hinglish or Hindi — and switch when the merchant does. You can force a language here.',el:()=>$('#lang'),run:async()=>{}},
+ {t:'Photos and deals',p:'Owners can attach a dish photo to get a post draft with it, and Deals shows their live magicpin offers or suggests one from the catalog.',el:()=>$('#dealsBtn'),run:async()=>{}},
+ {t:'The judge\'s tests, one click each',p:'Auto-reply hell: the same canned reply four times. Vera nudges the owner once, then exits — production Vera burns 2–3 turns here.',el:()=>$('.verdict')||lastV(),run:async()=>{go('tests');await runTest('auto_reply');await until('.verdict')}},
+ {t:'Confidential by design',p:'Competitor numbers, customers\' phone numbers, internal instructions — refused politely. The merchant\'s own data — answered.',el:()=>$('.verdict')||lastV(),run:async()=>{await runTest('confidential');await until('.verdict')}},
+ {t:'Adapts to new context',p:'After submission the judge pushes new research, shifted numbers and new customers. Before/after: Vera uses them immediately, without inventing anything.',el:()=>$('.verdict')||$('#log'),run:async()=>{await runInject();await until('.verdict')}},
+ {t:'Try your own scenario',p:'Make up any business and what happened today — rain, a festival, a competitor, a drop in calls — and Vera writes the message live.',el:()=>$('#side'),run:async()=>{go('custom');await until('#cf')}},
+ {t:'Nothing gets lost',p:'Every chat is saved and restored on reload, even across server restarts. History lists your previous chats — open one to continue.',el:()=>$('#nav button[data-m="history"]'),run:async()=>{go('history');await sleep(400)}},
+ {t:'That\'s Vera',p:'All features are summarised here with a “See it live” button each. Thanks for taking the tour!',el:()=>$('#log'),run:async()=>{go('features');await sleep(300)}},
+];
+const tour={i:-1,busy:false,
+ async start(){this.i=-1;await this.next()},
+ async step(i){if(this.busy)return;this.busy=true;this.i=i;const s=TOUR[i];this.card(s,true);try{await s.run()}catch(e){}await sleep(250);this.busy=false;this.card(s,false);
+  [350,900,1800].forEach(ms=>setTimeout(()=>{if(tour.i===i)tour.place()},ms))},
+ async next(){if(this.i<TOUR.length-1)await this.step(this.i+1);else this.end()},
+ async back(){if(this.i>0)await this.step(this.i-1)},
+ end(){this.i=-1;['#tourHole','#tourCard'].forEach(s=>{const e=$(s);if(e)e.remove()});removeEventListener('resize',tour.place)},
+ card(s,loading){let hole=$('#tourHole'),c=$('#tourCard');if(!hole){hole=document.createElement('div');hole.id='tourHole';document.body.appendChild(hole);addEventListener('resize',tour.place)}
+  if(!c){c=document.createElement('div');c.id='tourCard';document.body.appendChild(c)}
+  c.innerHTML=`<div class="dots">${TOUR.map((_,k)=>`<i class="${k<=this.i?'on':''}"></i>`).join('')}</div><small>Step ${this.i+1} of ${TOUR.length}</small><h4>${esc(s.t)}</h4><p>${loading?'Loading the live demo…':esc(s.p)}</p>
+   <div class="tb">${this.i>0?'<button class="bk">Back</button>':''}<button class="nx"${loading?' disabled':''}>${this.i===TOUR.length-1?'Finish':'Next'}</button><button class="x" title="Close tour">✕ Close</button></div>`;
+  const bk=c.querySelector('.bk');if(bk)bk.onclick=()=>tour.back();c.querySelector('.nx').onclick=()=>tour.next();c.querySelector('.x').onclick=()=>tour.end();this.place()},
+ place(){const s=TOUR[tour.i];const hole=$('#tourHole'),c=$('#tourCard');if(!s||!hole||!c)return;const el=s.el&&s.el();
+  if(el&&el.scrollIntoView)el.scrollIntoView({block:'nearest'});const r=el?el.getBoundingClientRect():{left:innerWidth/2,top:innerHeight/2,width:0,height:0};
+  const pad=6,L=Math.max(4,r.left-pad),T=Math.max(4,r.top-pad),R=Math.min(innerWidth-4,r.left+r.width+pad),B=Math.min(innerHeight-4,r.top+r.height+pad);
+  Object.assign(hole.style,{left:L+'px',top:T+'px',width:Math.max(0,R-L)+'px',height:Math.max(0,B-T)+'px'});
+  const cw=c.offsetWidth,ch=c.offsetHeight,gap=14;let top,left;
+  if(B+gap+ch<=innerHeight-10){top=B+gap;left=Math.min(Math.max(16,L),innerWidth-cw-16)}           // below
+  else if(T-gap-ch>=10){top=T-gap-ch;left=Math.min(Math.max(16,L),innerWidth-cw-16)}              // above
+  else if(innerWidth-R-gap>=cw+16){left=R+gap;top=Math.min(Math.max(10,T),innerHeight-ch-10)}      // right
+  else if(L-gap-cw>=16){left=L-gap-cw;top=Math.min(Math.max(10,T),innerHeight-ch-10)}              // left
+  else{left=innerWidth-cw-24;top=innerHeight-ch-24}                                                // corner, over the edge
+  c.style.top=top+'px';c.style.left=left+'px'}};
+document.addEventListener('keydown',e=>{if(tour.i<0)return;if(e.key==='Escape')tour.end();else if(e.key==='ArrowRight')tour.next();else if(e.key==='ArrowLeft')tour.back()});
 
 // ---------- chat history (saved on the server + a copy in this browser, listed per browser)
 async function allChats(){let srv=[];try{srv=await (await fetch('/demo/api/chats?owner='+encodeURIComponent(OWNER))).json()}catch(e){}
@@ -1089,8 +1209,9 @@ async function week(x){if(!x)return;MODE='week';side();sid=null;input(false,'Wee
  $('#drawer').innerHTML=`<div class="dh"><b>📅 Why a portfolio</b><button onclick="drawer(false)">×</button></div><div class="sec"><p>Reminders like renewals are rare. Engaging a merchant 3–5× a week needs knowledge- and curiosity-led conversations: research, trends, events, asks. Each one here is fact-checked.</p></div>`;drawer(true)}
 
 // ---------- wiring
-document.querySelectorAll('#nav button').forEach(b=>b.onclick=()=>{MODE=b.dataset.m;document.querySelectorAll('#nav button').forEach(x=>x.classList.toggle('on',x===b));$('#shell').classList.toggle('custom',MODE==='custom'||MODE==='history');side();
- if(MODE==='chat')empty();else if(MODE==='history'){if(!sid){drawer(false);header('Your previous chats',false);input(false,'Pick a saved chat');
+document.querySelectorAll('#nav button').forEach(b=>b.onclick=()=>{MODE=b.dataset.m;document.querySelectorAll('#nav button').forEach(x=>x.classList.toggle('on',x===b));$('#shell').classList.toggle('custom',MODE==='custom'||MODE==='history');$('#shell').classList.toggle('featmode',MODE==='features');side();
+ if(MODE==='chat')empty();else if(MODE==='features'){sid=null;drawer(false);header('Features & guided tour',false);input(false,'Pick a feature to see it live');featurePage()}
+ else if(MODE==='history'){if(!sid){drawer(false);header('Your previous chats',false);input(false,'Pick a saved chat');
   $('#log').innerHTML=`<div class="empty"><h2>History</h2><p>Every chat you start here is saved automatically. Pick one on the left to read it again or continue where you left off.</p></div>`}}
  else if(MODE==='custom'){sid=null;cur=null;drawer(false);header('Your own scenario',false);input(false,'Fill in the form, then reply here');
   $('#log').innerHTML=`<div class="empty"><h2>Try your own scenario</h2><p>Pick a category, make up a business and choose what happened today — rain, a festival, a competitor, a drop in calls, a new review theme, a customer due for a visit. Vera writes the message live, and you can reply to it like the owner.</p><p style="font-size:13px">Nothing here is pre-written: the same agents that handle the official test cases run on your data.</p></div>`}

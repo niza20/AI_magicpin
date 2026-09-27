@@ -254,3 +254,14 @@ def test_browser_copy_is_reimported_after_server_lost_its_disk(tmp_path):
     assert not c.post("/demo/api/chats/import", json={**local, "owner": "owner_dddddddd4"}).json()["imported"]
     assert c.post("/demo/api/chats/import", json={**local, "id": "../x", "owner": me}).status_code == 400
     assert c.post("/demo/api/chats/import", json={**local, "start": {"type": "evil"}, "id": "abcdef012345", "owner": me}).status_code == 400
+
+
+def test_features_tab_stats_are_live():
+    import os
+    if not os.path.exists(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "dataset", "expanded")):
+        pytest.skip("official dataset not expanded")
+    c = TestClient(bot.app)
+    st = c.get("/demo/api/features").json()
+    assert st["test_pairs"] == 30 and st["triggers"] == 100 and st["fallbacks"] == 0 and st["categories"] == 5
+    page = c.get("/demo").text
+    assert 'data-m="features"' in page and "const TOUR=[" in page and "Start the guided tour" in page
