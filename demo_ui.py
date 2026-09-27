@@ -327,6 +327,22 @@ def reply(body: dict):
     return r
 
 
+@router.post("/demo/api/language")
+def set_language(body: dict):
+    """Switch the language of a conversation in progress; Vera's next replies use it."""
+    sid = body.get("session_id", "")
+    st = _session(sid)
+    if not st:
+        return JSONResponse(status_code=404, content={"error": "session expired — pick a scenario again"})
+    lg = LANGS.get(body.get("language") or "auto")
+    st.language, st.language_locked = lg, bool(lg)
+    try:
+        demo_store.append(sid, [{"role": "lang", "language": body.get("language") or "auto"}])
+    except Exception:
+        pass
+    return {"ok": True, "language": lg or "auto"}
+
+
 @router.post("/demo/api/deals")
 def deals(body: dict):
     sid = body.get("session_id", "")
@@ -759,6 +775,9 @@ def _session(sid: str) -> Optional[ConversationState]:
                     _engine.respond_photo(st, e["img"], e.get("text", ""))
                 else:
                     _engine.respond(st, e.get("text", ""), "customer" if st.customer else "merchant")
+            elif e.get("role") == "lang":
+                lg = LANGS.get(e.get("language") or "auto")
+                st.language, st.language_locked = lg, bool(lg)
             elif e.get("role") == "deals":
                 _engine.deals(st)
     except Exception:
@@ -1221,7 +1240,10 @@ document.querySelectorAll('#nav button').forEach(b=>b.onclick=()=>{MODE=b.datase
   $('#log').innerHTML=`<div class="empty"><h2>Try your own scenario</h2><p>Pick a category, make up a business and choose what happened today — rain, a festival, a competitor, a drop in calls, a new review theme, a customer due for a visit. Vera writes the message live, and you can reply to it like the owner.</p><p style="font-size:13px">Nothing here is pre-written: the same agents that handle the official test cases run on your data.</p></div>`}
  else{sid=null;drawer(false);header(MODE==='tests'?'Pick a judge test on the left':'Pick a merchant on the left',false);input(false,'Read-only view');
   $('#log').innerHTML=`<div class="empty"><h2>${MODE==='tests'?'Judge tests':'Weekly plan'}</h2><p>${MODE==='tests'?'Run the exact scenarios magicpin\'s judge uses: auto-replies, intent switches, hostile replies, curveballs, and new context arriving mid-test.':'See five different conversations Vera would have with one merchant this week.'}</p></div>`}});
-$('#lang').onchange=e=>{LANG=e.target.value;if(MODE==='chat'&&cur)start(cur)};
+$('#lang').onchange=async e=>{LANG=e.target.value;const name={auto:'the merchant\'s own language',en:'English','hi-en':'Hinglish',hi:'हिन्दी'}[LANG];
+ const bubbles=document.querySelectorAll('#log .b').length;
+ if(MODE==='chat'&&cur&&cur.trigger_id&&bubbles<=1){start(cur);return}                 // only the opening so far → rewrite it
+ if(sid){const r=await post('/demo/api/language',{session_id:sid,language:LANG});if(!r.error){LH.add(sid,[{role:'lang',language:LANG}]);chip('Language switched to '+esc(name)+' — Vera replies in it from now on','sys')}}};
 $('#insBtn').onclick=()=>drawer(!$('#shell').classList.contains('drawer'));$('#dealsBtn').onclick=deals;
 $('#f').onsubmit=e=>{e.preventDefault();send($('#in').value)};
 $('#att').onclick=()=>$('#file').click();
