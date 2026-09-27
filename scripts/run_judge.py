@@ -16,6 +16,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 import judge_simulator as js  # noqa: E402
+from urllib import request as _urlreq  # noqa: E402
+
+# Some providers (e.g. Groq, behind Cloudflare) return 403 to Python's default "Python-urllib" user agent.
+_opener = _urlreq.build_opener()
+_opener.addheaders = [("User-Agent", "Mozilla/5.0 (vera-judge-runner)"), ("Accept", "application/json")]
+_urlreq.install_opener(_opener)
 from vera.dataset import load_dataset  # noqa: E402
 
 bot_url = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("BOT_URL", "http://localhost:8080")
@@ -67,7 +73,13 @@ if provider and (key or provider == "ollama"):
     try:
         llm.complete("Say ready.", "You are a test assistant.")
     except Exception as e:  # show a clear message instead of a stack trace
-        sys.exit(f"Could not reach {provider}: {e}\nCheck JUDGE_PROVIDER / JUDGE_API_KEY / JUDGE_MODEL.")
+        detail = ""
+        if hasattr(e, "read"):
+            try:
+                detail = e.read().decode("utf-8", "ignore")[:300]
+            except Exception:
+                pass
+        sys.exit(f"Could not reach {provider}: {e}\n{detail}\nCheck JUDGE_PROVIDER / JUDGE_API_KEY / JUDGE_MODEL.")
 else:
     llm = StubLLM()
 
